@@ -11,10 +11,9 @@ except ImportError:
 if load_dotenv:
     load_dotenv()
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://postgres:Harinisri%4020@localhost:5432/research_paper_db",
-)
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL must be set in the environment.")
 
 engine = create_engine(
     DATABASE_URL,

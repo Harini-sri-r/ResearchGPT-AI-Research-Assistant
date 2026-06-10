@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -40,6 +40,11 @@ class User(Base):
     )
     query_logs = relationship(
         "QueryLog",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    revoked_tokens = relationship(
+        "RevokedToken",
         back_populates="user",
         cascade="all, delete-orphan",
     )
@@ -148,7 +153,7 @@ class QueryLog(Base):
 
     query = Column(Text, nullable=False)
 
-    response_time = Column(Float, nullable=False)
+    response_time = Column(String(50), nullable=False)
 
     timestamp = Column(
         DateTime(timezone=True),
@@ -157,3 +162,24 @@ class QueryLog(Base):
     )
 
     user = relationship("User", back_populates="query_logs")
+
+
+class RevokedToken(Base):
+    __tablename__ = "revoked_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    token_jti = Column(String(64), unique=True, index=True, nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    revoked_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    user = relationship("User", back_populates="revoked_tokens")

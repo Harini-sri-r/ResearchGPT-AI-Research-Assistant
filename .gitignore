@@ -11,6 +11,7 @@ chroma_db/
 
 # Uploaded PDFs
 ResearchGPT/papers/
+papers/user_*/
 
 # Environment Variables
 .env

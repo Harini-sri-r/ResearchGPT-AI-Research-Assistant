@@ -11,6 +11,7 @@ REQUIRED_COLUMNS = {
     "search_history": {"id", "user_id", "query", "searched_at"},
     "favorites": {"id", "user_id", "paper_name", "saved_at"},
     "query_logs": {"id", "user_id", "query", "response_time", "timestamp"},
+    "revoked_tokens": {"id", "user_id", "token_jti", "expires_at", "revoked_at"},
 }
 
 COLUMN_DEFINITIONS = {
@@ -51,8 +52,15 @@ COLUMN_DEFINITIONS = {
         "id": "INTEGER",
         "user_id": "INTEGER REFERENCES users(id) ON DELETE CASCADE",
         "query": "TEXT",
-        "response_time": "DOUBLE PRECISION",
+        "response_time": "VARCHAR(50)",
         "timestamp": "TIMESTAMP WITH TIME ZONE DEFAULT now()",
+    },
+    "revoked_tokens": {
+        "id": "INTEGER",
+        "user_id": "INTEGER REFERENCES users(id) ON DELETE CASCADE",
+        "token_jti": "VARCHAR(64)",
+        "expires_at": "TIMESTAMP WITH TIME ZONE",
+        "revoked_at": "TIMESTAMP WITH TIME ZONE DEFAULT now()",
     },
 }
 

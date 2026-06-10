@@ -18,9 +18,11 @@ Features:
 """
 
 from pypdf import PdfReader
+import hashlib
 import os
 import nltk
 import chromadb
+from pathlib import Path
 
 from nltk.tokenize import word_tokenize
 from nltk.corpus import stopwords
@@ -64,23 +66,8 @@ except Exception as error:
 print("\nValidating papers folder...")
 
 pdf_folder = "papers"
-
-if not os.path.isdir(pdf_folder):
-    raise FileNotFoundError(
-        f"Folder not found: {pdf_folder}"
-    )
-
-pdf_files = [
-    f for f in os.listdir(pdf_folder)
-    if f.endswith(".pdf")
-]
-
-if len(pdf_files) == 0:
-    raise Exception(
-        "No PDF files found in papers folder."
-    )
-
-print(f"Found {len(pdf_files)} PDF files")
+print("Startup PDF indexing disabled. Uploaded papers are indexed per user.")
+pdf_files = []
 
 # ===================================================================
 # LOAD PDFs AND CREATE CHUNKS
@@ -92,6 +79,7 @@ all_text = ""
 chunks = []
 sources = []
 papers = {}
+user_papers = {}
 page_numbers = []
 chunk_counter = 0
 
@@ -101,13 +89,21 @@ for file in pdf_files:
 
     pdf_path = os.path.join(pdf_folder, file)
 
-    reader = PdfReader(pdf_path)
+    try:
+        reader = PdfReader(pdf_path)
+    except Exception as error:
+        print(f"Skipping unreadable PDF {file}: {error}")
+        continue
 
     current_text = ""
 
     for page_num, page in enumerate(reader.pages, start=1):
 
-        page_text = page.extract_text()
+        try:
+            page_text = page.extract_text()
+        except Exception as error:
+            print(f"Skipping unreadable page {page_num} in {file}: {error}")
+            continue
 
         if page_text:
 
@@ -180,7 +176,7 @@ print("\n" + "=" * 70)
 print("STEP 4 : EMBEDDINGS")
 print("=" * 70)
 
-chunk_embeddings = model.encode(chunks)
+chunk_embeddings = model.encode(chunks) if chunks else []
 
 # ===================================================================
 # CHROMADB WITH CHUNK IDS
@@ -205,21 +201,8 @@ print("Chunks:", len(chunks))
 print("Sources:", len(sources))
 print("Pages:", len(page_numbers))
 
-for i, chunk in enumerate(chunks):
-
-    collection.add(
-        ids=[str(i)],
-        documents=[chunk],
-        embeddings=[
-            chunk_embeddings[i].tolist()
-        ],
-        metadatas=[
-        {
-            "source": sources[i],
-            "page": page_numbers[i]
-        }
-    ]
-)
+if chunks:
+    print("Skipping global ChromaDB indexing. Use index_uploaded_paper per user.")
 
 
 # ===================================================================
@@ -232,8 +215,90 @@ print("=" * 70)
 
 # Helper functions
 
-def summarize_paper(filename):
-    paper = papers.get(filename)
+def _paper_key(user_id, filename):
+    return (int(user_id), filename)
+
+
+def _get_paper_text(filename, user_id=None):
+    if user_id is not None:
+        return user_papers.get(_paper_key(user_id, filename))
+
+    return papers.get(filename)
+
+
+def _extract_pdf_text_and_chunks(file_path):
+    reader = PdfReader(str(file_path))
+    paper_text = ""
+    extracted_chunks = []
+    extracted_pages = []
+
+    for page_num, page in enumerate(reader.pages, start=1):
+        page_text = page.extract_text()
+
+        if not page_text:
+            continue
+
+        paper_text += page_text + "\n"
+        doc_chunks = splitter.split_text(page_text)
+
+        for chunk in doc_chunks:
+            extracted_chunks.append(chunk)
+            extracted_pages.append(page_num)
+
+    return paper_text, extracted_chunks, extracted_pages
+
+
+def index_uploaded_paper(file_path, filename, user_id):
+    file_path = Path(file_path)
+    paper_text, extracted_chunks, extracted_pages = _extract_pdf_text_and_chunks(
+        file_path
+    )
+
+    if not extracted_chunks:
+        raise ValueError("No extractable text found in uploaded PDF.")
+
+    embeddings = model.encode(extracted_chunks)
+    filename_hash = hashlib.sha256(filename.encode("utf-8")).hexdigest()[:16]
+
+    ids = []
+    metadatas = []
+
+    for index, chunk in enumerate(extracted_chunks):
+        chunk_hash = hashlib.sha256(
+            f"{user_id}:{filename}:{extracted_pages[index]}:{index}:{chunk}".encode(
+                "utf-8"
+            )
+        ).hexdigest()[:16]
+        ids.append(
+            f"user:{user_id}:file:{filename_hash}:page:{extracted_pages[index]}:"
+            f"chunk:{index}:{chunk_hash}"
+        )
+        metadatas.append(
+            {
+                "user_id": int(user_id),
+                "filename": filename,
+                "source": filename,
+                "page": extracted_pages[index],
+            }
+        )
+
+    collection.upsert(
+        ids=ids,
+        documents=extracted_chunks,
+        embeddings=[
+            embedding.tolist()
+            for embedding in embeddings
+        ],
+        metadatas=metadatas,
+    )
+
+    user_papers[_paper_key(user_id, filename)] = paper_text
+
+    return len(extracted_chunks)
+
+
+def summarize_paper(filename, user_id=None):
+    paper = _get_paper_text(filename, user_id=user_id)
     if not paper:
         return "Paper not found."
     
@@ -252,9 +317,9 @@ Paper:
 """
     return llm.invoke(prompt)
 
-def compare_papers(file1, file2):
-    p1 = papers.get(file1)
-    p2 = papers.get(file2)
+def compare_papers(file1, file2, user_id=None):
+    p1 = _get_paper_text(file1, user_id=user_id)
+    p2 = _get_paper_text(file2, user_id=user_id)
     
     if not p1 or not p2:
         return "Paper not found."
@@ -278,11 +343,11 @@ Paper 2:
 """
     return llm.invoke(prompt)
 
-def literature_review(files):
+def literature_review(files, user_id=None):
     summaries = []
     
     for f in files:
-        paper = papers.get(f)
+        paper = _get_paper_text(f, user_id=user_id)
         if paper:
             summary_prompt = f"""
 Analyze this research paper in detail.
@@ -324,11 +389,11 @@ Paper Summaries:
 """
     return llm.invoke(prompt)
 
-def research_gap(files):
+def research_gap(files, user_id=None):
     summaries = []
     
     for f in files:
-        paper = papers.get(f)
+        paper = _get_paper_text(f, user_id=user_id)
         if paper:
             gap_prompt = f"""
 Analyze this research paper in detail.
@@ -370,11 +435,11 @@ Research Papers Analysis:
 """
     return llm.invoke(prompt)
 
-def analyze_papers(files):
+def analyze_papers(files, user_id=None):
     content = ""
     
     for f in files:
-        paper = papers.get(f)
+        paper = _get_paper_text(f, user_id=user_id)
         if paper:
             content += f"\n\n===== {f} =====\n"
             content += paper[:5000]
@@ -402,11 +467,11 @@ Research Papers:
 """
     return llm.invoke(prompt)
 
-def recommend_research(files):
+def recommend_research(files, user_id=None):
     content = ""
     
     for f in files:
-        paper = papers.get(f)
+        paper = _get_paper_text(f, user_id=user_id)
         if paper:
             content += f"\n\n=== {f} ===\n{paper[:4000]}"
     
@@ -449,11 +514,11 @@ Research Papers:
 """
     return llm.invoke(prompt)
 
-def generate_survey(files):
+def generate_survey(files, user_id=None):
     summaries = []
     
     for f in files:
-        paper = papers.get(f)
+        paper = _get_paper_text(f, user_id=user_id)
         if paper:
             summary_prompt = f"""
 Analyze this research paper.
@@ -523,17 +588,27 @@ Research Papers Summaries:
 """
     return llm.invoke(prompt)
 
-def answer_question(question):
+def answer_question(question, user_id=None):
 
     query_embedding = model.encode(question)
 
-    results = collection.query(
-        query_embeddings=[query_embedding.tolist()],
-        n_results=3
-    )
+    query_kwargs = {
+        "query_embeddings": [query_embedding.tolist()],
+        "n_results": 3,
+    }
+
+    if user_id is not None:
+        query_kwargs["where"] = {
+            "user_id": int(user_id)
+        }
+
+    results = collection.query(**query_kwargs)
 
     retrieved_chunks = results["documents"][0]
     retrieved_metas = results["metadatas"][0]
+
+    if not retrieved_chunks:
+        return "Information not found in uploaded papers."
 
     context = "\n\n".join(retrieved_chunks)
 
@@ -559,7 +634,7 @@ Answer:
 
     for meta in retrieved_metas:
         if meta:
-            evidence.add(meta["source"])
+            evidence.add(meta.get("filename") or meta.get("source"))
 
     return (
         answer

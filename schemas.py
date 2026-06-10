@@ -86,3 +86,107 @@ class UserResponse(BaseModel):
 
 class MessageResponse(BaseModel):
     message: str
+
+
+class LoginRequest(BaseModel):
+    username_or_email: str = Field(
+        ...,
+        min_length=3,
+        max_length=200,
+        description="Username or email address for the account.",
+    )
+    password: str = Field(
+        ...,
+        min_length=1,
+        description="Account password.",
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "username_or_email": "researcher01@example.com",
+                "password": "StrongPass123",
+            }
+        }
+    }
+
+    @field_validator("username_or_email")
+    @classmethod
+    def normalize_username_or_email(cls, value: str) -> str:
+        return value.strip()
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int
+    user: UserResponse
+
+
+class FavoriteCreate(BaseModel):
+    paper_name: str = Field(
+        ...,
+        min_length=1,
+        max_length=300,
+        description="Paper name to save as a favorite.",
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "paper_name": "attention-is-all-you-need.pdf",
+            }
+        }
+    }
+
+    @field_validator("paper_name")
+    @classmethod
+    def normalize_paper_name(cls, value: str) -> str:
+        normalized_name = value.strip()
+        if not normalized_name:
+            raise ValueError("Paper name cannot be empty.")
+
+        return normalized_name
+
+
+class FavoriteResponse(BaseModel):
+    id: int
+    paper_name: str
+    saved_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class UploadedPaperResponse(BaseModel):
+    id: int
+    filename: str
+    filepath: str
+    upload_time: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ChatHistoryResponse(BaseModel):
+    id: int
+    question: str
+    answer: str
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SearchHistoryResponse(BaseModel):
+    id: int
+    query: str
+    searched_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class QueryLogResponse(BaseModel):
+    id: int
+    query: str
+    response_time: str
+    timestamp: datetime
+
+    model_config = ConfigDict(from_attributes=True)

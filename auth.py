@@ -24,4 +24,7 @@ def verify_password(password: str, password_hash: str) -> bool:
     if len(password_bytes) > MAX_BCRYPT_PASSWORD_BYTES:
         return False
 
-    return bcrypt.checkpw(password_bytes, hash_bytes)
+    try:
+        return bcrypt.checkpw(password_bytes, hash_bytes)
+    except ValueError:
+        return False
