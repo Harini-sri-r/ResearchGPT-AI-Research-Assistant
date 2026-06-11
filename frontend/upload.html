@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Upload PDF | ResearchGPT</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/dashboard.css">
+    <script src="js/api.js" defer></script>
+    <script src="js/auth.js" defer></script>
+    <script src="js/favorites.js" defer></script>
+    <script src="js/upload.js" defer></script>
+</head>
+<body class="app-page" data-auth-required="true">
+    <div class="app-layout">
+        <aside class="sidebar">
+            <a class="brand sidebar-brand" href="dashboard.html">
+                <img src="assets/logo.png" onerror="this.src='assets/logo.svg'" alt="" class="brand-logo">
+                <span>ResearchGPT</span>
+            </a>
+            <nav class="side-nav" aria-label="Dashboard navigation">
+                <a href="dashboard.html"><span>Dashboard</span></a>
+                <a class="active" href="upload.html"><span>Upload PDF</span></a>
+                <a href="mypapers.html"><span>My Papers</span></a>
+                <a href="history.html?tab=chat"><span>Chat History</span></a>
+                <a href="history.html?tab=search"><span>Search History</span></a>
+                <a href="favorites.html"><span>Favorites</span></a>
+                <a href="profile.html"><span>Profile</span></a>
+                <button type="button" data-logout><span>Logout</span></button>
+            </nav>
+        </aside>
+
+        <main class="workspace">
+            <header class="workspace-header">
+                <div>
+                    <p class="eyebrow">Upload</p>
+                    <h1>Upload PDF</h1>
+                </div>
+                <button class="icon-button" type="button" data-theme-toggle aria-label="Toggle theme"></button>
+            </header>
+
+            <section class="upload-grid">
+                <div class="upload-zone" id="dropZone">
+                    <input id="fileInput" type="file" accept="application/pdf,.pdf" hidden>
+                    <div class="upload-symbol" aria-hidden="true">PDF</div>
+                    <h2>Drop a PDF here</h2>
+                    <p>or choose a file from your device</p>
+                    <button class="button button-primary" type="button" id="chooseFile">Choose file</button>
+                    <div class="progress-shell" aria-hidden="true">
+                        <span id="uploadProgress"></span>
+                    </div>
+                    <div id="uploadStatus" class="form-message" role="status" aria-live="polite"></div>
+                </div>
+
+                <section class="data-panel" aria-labelledby="uploaded-title">
+                    <div class="panel-heading">
+                        <h2 id="uploaded-title">Uploaded files</h2>
+                        <button class="button button-ghost" id="refreshPapers" type="button">Refresh</button>
+                    </div>
+                    <div id="uploadedList" class="data-list"></div>
+                </section>
+            </section>
+        </main>
+    </div>
+</body>
+</html>

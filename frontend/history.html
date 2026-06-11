@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>History | ResearchGPT</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/dashboard.css">
+    <script src="js/api.js" defer></script>
+    <script src="js/auth.js" defer></script>
+    <script src="js/history.js" defer></script>
+</head>
+<body class="app-page" data-auth-required="true">
+    <div class="app-layout">
+        <aside class="sidebar">
+            <a class="brand sidebar-brand" href="dashboard.html">
+                <img src="assets/logo.png" onerror="this.src='assets/logo.svg'" alt="" class="brand-logo">
+                <span>ResearchGPT</span>
+            </a>
+            <nav class="side-nav" aria-label="Dashboard navigation">
+                <a href="dashboard.html"><span>Dashboard</span></a>
+                <a href="upload.html"><span>Upload PDF</span></a>
+                <a href="mypapers.html"><span>My Papers</span></a>
+                <a class="active" href="history.html?tab=chat"><span>Chat History</span></a>
+                <a href="history.html?tab=search"><span>Search History</span></a>
+                <a href="favorites.html"><span>Favorites</span></a>
+                <a href="profile.html"><span>Profile</span></a>
+                <button type="button" data-logout><span>Logout</span></button>
+            </nav>
+        </aside>
+
+        <main class="workspace">
+            <header class="workspace-header">
+                <div>
+                    <p class="eyebrow">History</p>
+                    <h1>Research timeline</h1>
+                </div>
+                <button class="icon-button" type="button" data-theme-toggle aria-label="Toggle theme"></button>
+            </header>
+
+            <section class="data-panel full-panel">
+                <div class="history-toolbar">
+                    <div class="segmented-control" role="tablist" aria-label="History type">
+                        <button type="button" id="chatTab" class="active" data-tab="chat">Chat History</button>
+                        <button type="button" id="searchTab" data-tab="search">Search History</button>
+                    </div>
+                    <input id="historySearch" type="search" placeholder="Search history">
+                    <button class="button button-ghost" id="clearSearchHistory" type="button">Clear searches</button>
+                </div>
+                <div id="historyList" class="data-list history-list"></div>
+            </section>
+        </main>
+    </div>
+</body>
+</html>

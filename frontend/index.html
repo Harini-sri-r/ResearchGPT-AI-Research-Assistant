@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ResearchGPT</title>
+    <link rel="stylesheet" href="css/style.css">
+    <script src="js/api.js" defer></script>
+    <script src="js/auth.js" defer></script>
+</head>
+<body class="landing-page">
+    <header class="site-header">
+        <nav class="site-nav" aria-label="Primary navigation">
+            <a class="brand" href="index.html" aria-label="ResearchGPT home">
+                <img src="assets/logo.png" onerror="this.src='assets/logo.svg'" alt="" class="brand-logo">
+                <span>ResearchGPT</span>
+            </a>
+            <div class="nav-actions">
+                <a href="#features">Features</a>
+                <a href="#about">About</a>
+                <a href="#contact">Contact</a>
+                <button class="icon-button" type="button" data-theme-toggle aria-label="Toggle theme"></button>
+                <a class="button button-ghost" href="login.html">Login</a>
+                <a class="button button-primary" href="register.html" data-auth-link>Register</a>
+            </div>
+        </nav>
+    </header>
+
+    <main>
+        <section class="hero-section" aria-labelledby="hero-title">
+            <canvas id="heroCanvas" class="hero-canvas" aria-hidden="true"></canvas>
+            <div class="hero-overlay"></div>
+            <div class="hero-content">
+                <p class="eyebrow">AI-powered research workspace</p>
+                <h1 id="hero-title">ResearchGPT</h1>
+                <p class="hero-copy">
+                    Upload papers, retrieve grounded answers, keep research trails organized,
+                    and move from reading to insight with a focused AI assistant.
+                </p>
+                <div class="hero-actions">
+                    <a class="button button-primary" href="register.html">Create account</a>
+                    <a class="button button-glass" href="login.html">Sign in</a>
+                </div>
+            </div>
+        </section>
+
+        <section class="section-band" id="features" aria-labelledby="features-title">
+            <div class="section-inner">
+                <div class="section-heading">
+                    <p class="eyebrow">Research workflow</p>
+                    <h2 id="features-title">Everything connected to your papers</h2>
+                </div>
+                <div class="feature-grid">
+                    <article class="glass-card">
+                        <span class="feature-icon" aria-hidden="true">01</span>
+                        <h3>Private paper library</h3>
+                        <p>Upload PDFs into user-specific storage with retrieval isolated to your account.</p>
+                    </article>
+                    <article class="glass-card">
+                        <span class="feature-icon" aria-hidden="true">02</span>
+                        <h3>Grounded AI answers</h3>
+                        <p>Ask questions across indexed papers and keep evidence-backed responses in chat history.</p>
+                    </article>
+                    <article class="glass-card">
+                        <span class="feature-icon" aria-hidden="true">03</span>
+                        <h3>Research memory</h3>
+                        <p>Review chats, searches, favorites, query logs, and uploaded papers from one dashboard.</p>
+                    </article>
+                </div>
+            </div>
+        </section>
+
+        <section class="section-band section-split" id="about" aria-labelledby="about-title">
+            <div class="section-inner split-layout">
+                <div>
+                    <p class="eyebrow">About</p>
+                    <h2 id="about-title">Built for focused literature work</h2>
+                </div>
+                <p>
+                    ResearchGPT combines FastAPI, JWT authentication, PostgreSQL history, PDF upload indexing,
+                    and user-specific semantic retrieval into a clean workspace for repeatable research sessions.
+                </p>
+            </div>
+        </section>
+
+        <section class="section-band" id="contact" aria-labelledby="contact-title">
+            <div class="section-inner contact-strip">
+                <div>
+                    <p class="eyebrow">Contact</p>
+                    <h2 id="contact-title">Start your next review session</h2>
+                </div>
+                <a class="button button-primary" href="register.html">Get started</a>
+            </div>
+        </section>
+    </main>
+
+    <footer class="site-footer">
+        <span>ResearchGPT</span>
+        <span>AI-powered paper intelligence</span>
+    </footer>
+</body>
+</html>

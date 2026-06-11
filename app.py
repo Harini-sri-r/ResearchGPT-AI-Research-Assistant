@@ -242,6 +242,18 @@ def read_current_user(
 
 
 @app.get(
+    "/profile",
+    response_model=UserResponse,
+    tags=["Dashboard"],
+    summary="Get the current user's profile",
+)
+def read_profile(
+    current_user: User = Depends(get_current_user),
+):
+    return current_user
+
+
+@app.get(
     "/my-papers",
     response_model=list[UploadedPaperResponse],
     tags=["Dashboard"],
@@ -330,15 +342,26 @@ def ask_question(
             detail="Question cannot be empty.",
         )
 
-    if question.startswith("summarize"):
+    parts = question.split()
+    command = parts[0].lower()
 
-        filename = question.split()[1]
+    if command == "summarize":
+        if len(parts) < 2:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Usage: summarize <filename>",
+            )
+
+        filename = parts[1]
 
         result = summarize_paper(filename, user_id=current_user.id)
 
-    elif question.startswith("compare"):
-
-        parts = question.split()
+    elif command == "compare":
+        if len(parts) < 3:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Usage: compare <file1> <file2>",
+            )
 
         file1 = parts[1]
         file2 = parts[2]
@@ -349,27 +372,23 @@ def ask_question(
             user_id=current_user.id,
         )
 
-    elif question.startswith("review"):
-
-        files = question.split()[1:]
+    elif command == "review":
+        files = parts[1:]
 
         result = literature_review(files, user_id=current_user.id)
 
-    elif question.startswith("gap"):
-
-        files = question.split()[1:]
+    elif command == "gap":
+        files = parts[1:]
 
         result = research_gap(files, user_id=current_user.id)
 
-    elif question.startswith("recommend"):
-
-        files = question.split()[1:]
+    elif command == "recommend":
+        files = parts[1:]
 
         result = recommend_research(files, user_id=current_user.id)
 
-    elif question.startswith("survey"):
-
-        files = question.split()[1:]
+    elif command == "survey":
+        files = parts[1:]
 
         result = generate_survey(files, user_id=current_user.id)
 
@@ -526,19 +545,22 @@ def list_favorites(
 
 
 @app.delete(
-    "/favorites/{favorite_id}",
+    "/favorites/{id}",
     response_model=MessageResponse,
     tags=["Favorites"],
     summary="Delete one favorite for the current user",
 )
 def delete_favorite(
-    favorite_id: int,
+    id: int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     favorite = (
         db.query(Favorite)
-        .filter(Favorite.id == favorite_id)
+        .filter(
+            Favorite.id == id,
+            Favorite.user_id == current_user.id,
+        )
         .first()
     )
 
@@ -546,12 +568,6 @@ def delete_favorite(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Favorite not found.",
-        )
-
-    if favorite.user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You do not have permission to delete this favorite.",
         )
 
     db.delete(favorite)

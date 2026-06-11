@@ -31,8 +31,9 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from sentence_transformers import SentenceTransformer
 from langchain_ollama import OllamaLLM
 
-nltk.download("punkt", quiet=True)
-nltk.download("stopwords", quiet=True)
+nltk.download("punkt")
+nltk.download("punkt_tab")
+nltk.download("stopwords")
 
 # ===================================================================
 # CONFIGURATION
@@ -40,7 +41,17 @@ nltk.download("stopwords", quiet=True)
 
 print("\nInitializing AI Research Bot 3.0...")
 
-llm = OllamaLLM(model="llama3")
+BASE_DIR = Path(__file__).resolve().parent
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL")
+CHROMADB_PATH = os.getenv("CHROMADB_PATH", str(BASE_DIR / "chromadb"))
+
+llm_config = {
+    "model": "llama3",
+}
+if OLLAMA_BASE_URL:
+    llm_config["base_url"] = OLLAMA_BASE_URL
+
+llm = OllamaLLM(**llm_config)
 
 splitter = RecursiveCharacterTextSplitter(
     chunk_size=500,
@@ -50,7 +61,7 @@ splitter = RecursiveCharacterTextSplitter(
 try:
     model = SentenceTransformer(
         "all-MiniLM-L6-v2",
-        local_files_only=True
+        local_files_only=False
     )
 except Exception as error:
     raise RuntimeError(
@@ -65,7 +76,8 @@ except Exception as error:
 
 print("\nValidating papers folder...")
 
-pdf_folder = "papers"
+PDF_BASE_DIR = BASE_DIR / "papers"
+pdf_folder = str(PDF_BASE_DIR)
 print("Startup PDF indexing disabled. Uploaded papers are indexed per user.")
 pdf_files = []
 
@@ -182,7 +194,7 @@ chunk_embeddings = model.encode(chunks) if chunks else []
 # CHROMADB WITH CHUNK IDS
 # ===================================================================
 
-client = chromadb.PersistentClient(path="./chromadb")
+client = chromadb.PersistentClient(path=CHROMADB_PATH)
 
 collection = client.get_or_create_collection(
     name="research_papers"
@@ -219,9 +231,32 @@ def _paper_key(user_id, filename):
     return (int(user_id), filename)
 
 
+def _user_filename_filter(user_id, filename):
+    return {
+        "$and": [
+            {"user_id": int(user_id)},
+            {"filename": filename},
+        ]
+    }
+
+
 def _get_paper_text(filename, user_id=None):
+    filename = Path(filename).name
+
     if user_id is not None:
-        return user_papers.get(_paper_key(user_id, filename))
+        key = _paper_key(user_id, filename)
+        cached_paper = user_papers.get(key)
+
+        if cached_paper:
+            return cached_paper
+
+        paper_path = PDF_BASE_DIR / f"user_{int(user_id)}" / filename
+        if not paper_path.is_file():
+            return None
+
+        paper_text, _, _ = _extract_pdf_text_and_chunks(paper_path)
+        user_papers[key] = paper_text
+        return paper_text
 
     return papers.get(filename)
 
@@ -250,6 +285,7 @@ def _extract_pdf_text_and_chunks(file_path):
 
 def index_uploaded_paper(file_path, filename, user_id):
     file_path = Path(file_path)
+    filename = Path(filename).name
     paper_text, extracted_chunks, extracted_pages = _extract_pdf_text_and_chunks(
         file_path
     )
@@ -259,6 +295,10 @@ def index_uploaded_paper(file_path, filename, user_id):
 
     embeddings = model.encode(extracted_chunks)
     filename_hash = hashlib.sha256(filename.encode("utf-8")).hexdigest()[:16]
+
+    collection.delete(
+        where=_user_filename_filter(user_id, filename)
+    )
 
     ids = []
     metadatas = []
@@ -589,18 +629,18 @@ Research Papers Summaries:
     return llm.invoke(prompt)
 
 def answer_question(question, user_id=None):
+    if user_id is None:
+        raise ValueError("user_id is required for document retrieval.")
 
     query_embedding = model.encode(question)
 
     query_kwargs = {
         "query_embeddings": [query_embedding.tolist()],
         "n_results": 3,
-    }
-
-    if user_id is not None:
-        query_kwargs["where"] = {
+        "where": {
             "user_id": int(user_id)
-        }
+        },
+    }
 
     results = collection.query(**query_kwargs)
 

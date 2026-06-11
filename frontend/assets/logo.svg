@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="ResearchGPT logo">
+  <defs>
+    <linearGradient id="g" x1="20" y1="18" x2="108" y2="112" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#20c7a7"/>
+      <stop offset=".52" stop-color="#f3b64b"/>
+      <stop offset="1" stop-color="#e75f72"/>
+    </linearGradient>
+  </defs>
+  <rect x="10" y="10" width="108" height="108" rx="24" fill="#111827"/>
+  <path d="M35 36h42c13 0 22 8 22 20 0 9-5 16-13 19l16 18H82L68 77H53v16H35V36Zm18 15v12h22c4 0 7-2 7-6s-3-6-7-6H53Z" fill="url(#g)"/>
+  <circle cx="40" cy="93" r="7" fill="#20c7a7"/>
+  <circle cx="92" cy="36" r="6" fill="#f3b64b"/>
+</svg>

@@ -1,0 +1,69 @@
+services:
+  researchgpt-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: researchgpt-backend:latest
+    container_name: researchgpt-backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-60}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      CHROMADB_PATH: ${CHROMADB_PATH:-/app/chromadb}
+      SECRET_KEY: ${SECRET_KEY}
+    command: >
+      sh -c "python create_tables.py &&
+             uvicorn app:app --host 0.0.0.0 --port 8000"
+    ports:
+      - "8000:8000"
+    volumes:
+      - chromadb_data:${CHROMADB_PATH:-/app/chromadb}
+      - papers_data:/app/papers
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - researchgpt-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: researchgpt-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-researchgpt_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-researchgpt_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - researchgpt-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  postgres_data:
+  chromadb_data:
+  papers_data:
+
+networks:
+  researchgpt-network:
+    driver: bridge

@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Register | ResearchGPT</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/auth.css">
+    <script src="js/api.js" defer></script>
+    <script src="js/auth.js" defer></script>
+    <script src="js/register.js" defer></script>
+</head>
+<body class="auth-page" data-guest-only="true">
+    <main class="auth-layout">
+        <section class="auth-panel visual-panel" aria-label="ResearchGPT">
+            <a class="brand" href="index.html">
+                <img src="assets/logo.png" onerror="this.src='assets/logo.svg'" alt="" class="brand-logo">
+                <span>ResearchGPT</span>
+            </a>
+            <div class="auth-visual">
+                <div class="research-grid" aria-hidden="true">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </div>
+                <h1>Create your workspace</h1>
+                <p>Securely register and start building your private research memory.</p>
+            </div>
+        </section>
+
+        <section class="auth-panel form-panel" aria-labelledby="register-title">
+            <div class="form-header">
+                <button class="icon-button" type="button" data-theme-toggle aria-label="Toggle theme"></button>
+                <h2 id="register-title">Register</h2>
+                <p>Choose a username, email, and strong password.</p>
+            </div>
+
+            <form id="registerForm" class="auth-form" novalidate>
+                <label for="username">Username</label>
+                <input id="username" name="username" type="text" autocomplete="username" required minlength="3" maxlength="100">
+
+                <label for="email">Email</label>
+                <input id="email" name="email" type="email" autocomplete="email" required>
+
+                <label for="password">Password</label>
+                <input id="password" name="password" type="password" autocomplete="new-password" required minlength="8">
+
+                <div id="registerMessage" class="form-message" role="status" aria-live="polite"></div>
+
+                <button class="button button-primary button-wide" type="submit" data-loading-label="Creating account">
+                    <span class="button-label">Register</span>
+                    <span class="spinner" aria-hidden="true"></span>
+                </button>
+            </form>
+
+            <p class="auth-switch">
+                Already registered?
+                <a href="login.html">Login</a>
+            </p>
+        </section>
+    </main>
+</body>
+</html>

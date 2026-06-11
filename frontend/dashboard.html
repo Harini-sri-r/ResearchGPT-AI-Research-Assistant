@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard | ResearchGPT</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/dashboard.css">
+    <script src="js/api.js" defer></script>
+    <script src="js/auth.js" defer></script>
+    <script src="js/chat.js" defer></script>
+    <script src="js/dashboard.js" defer></script>
+</head>
+<body class="app-page" data-auth-required="true">
+    <div class="app-layout">
+        <aside class="sidebar">
+            <a class="brand sidebar-brand" href="dashboard.html">
+                <img src="assets/logo.png" onerror="this.src='assets/logo.svg'" alt="" class="brand-logo">
+                <span>ResearchGPT</span>
+            </a>
+            <nav class="side-nav" aria-label="Dashboard navigation">
+                <a class="active" href="dashboard.html"><span>Dashboard</span></a>
+                <a href="upload.html"><span>Upload PDF</span></a>
+                <a href="mypapers.html"><span>My Papers</span></a>
+                <a href="history.html?tab=chat"><span>Chat History</span></a>
+                <a href="history.html?tab=search"><span>Search History</span></a>
+                <a href="favorites.html"><span>Favorites</span></a>
+                <a href="profile.html"><span>Profile</span></a>
+                <button type="button" data-logout><span>Logout</span></button>
+            </nav>
+        </aside>
+
+        <main class="workspace">
+            <header class="workspace-header">
+                <div>
+                    <p class="eyebrow">Dashboard</p>
+                    <h1 id="welcomeTitle">Hello researcher</h1>
+                    <p id="dashboardEmail" class="header-meta"></p>
+                    <p id="welcomeMessage" class="welcome-message">Welcome back. Your research workspace is ready.</p>
+                </div>
+                <div class="toolbar">
+                    <button class="icon-button" type="button" data-theme-toggle aria-label="Toggle theme"></button>
+                    <a class="button button-primary" href="upload.html">Upload PDF</a>
+                </div>
+            </header>
+
+            <section class="stats-grid" aria-label="Research totals">
+                <article class="stat-card">
+                    <span>Total Uploaded Papers</span>
+                    <strong id="papersCount">0</strong>
+                </article>
+                <article class="stat-card">
+                    <span>Total Chats</span>
+                    <strong id="chatsCount">0</strong>
+                </article>
+                <article class="stat-card">
+                    <span>Total Favorites</span>
+                    <strong id="favoritesCount">0</strong>
+                </article>
+                <article class="stat-card">
+                    <span>Total Searches</span>
+                    <strong id="searchesCount">0</strong>
+                </article>
+                <article class="stat-card">
+                    <span>Query Logs</span>
+                    <strong id="queryLogsCount">0</strong>
+                </article>
+            </section>
+
+            <section class="quick-actions" aria-label="Quick actions">
+                <a class="action-card" href="upload.html">
+                    <span>Upload PDF</span>
+                    <strong>Add papers</strong>
+                </a>
+                <button class="action-card" type="button" id="focusChat">
+                    <span>Ask AI</span>
+                    <strong>Start chat</strong>
+                </button>
+                <a class="action-card" href="history.html">
+                    <span>View History</span>
+                    <strong>Open timeline</strong>
+                </a>
+            </section>
+
+            <section class="overview-grid" aria-label="Dashboard overview">
+                <article class="data-panel">
+                    <div class="panel-heading">
+                        <h2>Recent Papers</h2>
+                        <a class="button button-ghost" href="mypapers.html">Open</a>
+                    </div>
+                    <div id="dashboardPapers" class="data-list compact-list"></div>
+                </article>
+                <article class="data-panel">
+                    <div class="panel-heading">
+                        <h2>Favorites</h2>
+                        <a class="button button-ghost" href="favorites.html">Open</a>
+                    </div>
+                    <div id="dashboardFavorites" class="data-list compact-list"></div>
+                </article>
+                <article class="data-panel">
+                    <div class="panel-heading">
+                        <h2>Search History</h2>
+                        <a class="button button-ghost" href="history.html?tab=search">Open</a>
+                    </div>
+                    <div id="dashboardSearches" class="data-list compact-list"></div>
+                </article>
+                <article class="data-panel">
+                    <div class="panel-heading">
+                        <h2>Query Logs</h2>
+                        <button class="button button-ghost" id="refreshDashboardData" type="button">Refresh</button>
+                    </div>
+                    <div id="dashboardQueryLogs" class="data-list compact-list"></div>
+                </article>
+            </section>
+
+            <section class="chat-shell" aria-labelledby="chat-title">
+                <div class="chat-header">
+                    <div>
+                        <p class="eyebrow">AI Chat</p>
+                        <h2 id="chat-title">Ask your uploaded papers</h2>
+                    </div>
+                    <button class="button button-ghost" id="refreshHistory" type="button">Refresh</button>
+                </div>
+
+                <div id="chatMessages" class="chat-messages" aria-live="polite"></div>
+
+                <form id="chatForm" class="chat-form">
+                    <textarea id="questionInput" rows="2" placeholder="Ask a research question..." required></textarea>
+                    <button class="button button-primary" type="submit" data-loading-label="Thinking">
+                        <span class="button-label">Send</span>
+                        <span class="spinner" aria-hidden="true"></span>
+                    </button>
+                </form>
+            </section>
+        </main>
+    </div>
+</body>
+</html>

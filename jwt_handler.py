@@ -1,5 +1,3 @@
-
-
 import os
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
@@ -27,9 +25,12 @@ if not JWT_SECRET_KEY:
 
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 
-ACCESS_TOKEN_EXPIRE_MINUTES = int(
-    os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60")
-)
+access_token_expire_minutes = os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES")
+
+if not access_token_expire_minutes:
+    raise RuntimeError("ACCESS_TOKEN_EXPIRE_MINUTES must be set in the environment.")
+
+ACCESS_TOKEN_EXPIRE_MINUTES = int(access_token_expire_minutes)
 
 
 bearer_scheme = HTTPBearer(
@@ -83,42 +84,49 @@ def decode_access_token(token: str) -> dict:
             JWT_SECRET_KEY,
             algorithms=[JWT_ALGORITHM],
         )
-        print("✅ JWT decoded:", payload)
-        return payload
+    except JWTError as error:
+        raise credentials_exception() from error
 
-    except Exception as e:
-        print("❌ JWT decode failed:", type(e).__name__, str(e))
+    if payload.get("sub") is None or payload.get("jti") is None:
         raise credentials_exception()
+
+    return payload
 
 
 def is_token_revoked(payload: dict, db: Session) -> bool:
+    token_jti = payload.get("jti")
+    if token_jti is None:
+        return True
+
     return (
         db.query(RevokedToken)
-        .filter(RevokedToken.token_jti == payload["jti"])
+        .filter(RevokedToken.token_jti == token_jti)
         .first()
         is not None
     )
+
+
 def get_current_user(
     token: str = Depends(get_current_token),
     db: Session = Depends(get_db),
 ):
-
     payload = decode_access_token(token)
 
+    if is_token_revoked(payload, db):
+        raise credentials_exception()
 
-    revoked = is_token_revoked(payload, db)
-    print("REVOKED:", revoked)
+    try:
+        user_id = int(payload["sub"])
+    except (TypeError, ValueError) as error:
+        raise credentials_exception() from error
 
-    subject = payload.get("sub")
-    print("SUBJECT:", subject)
-
-    user = db.get(User, int(subject))
-    print("USER:", user)
+    user = db.get(User, user_id)
 
     if user is None:
         raise credentials_exception()
 
     return user
+
 
 def revoke_token(
     token: str,

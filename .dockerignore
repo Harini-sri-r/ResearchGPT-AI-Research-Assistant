@@ -1,0 +1,17 @@
+.git
+.gitignore
+.dockerignore
+.env
+.env.*
+.venv
+venv
+__pycache__
+**/__pycache__
+*.pyc
+chromadb
+chroma_db
+papers
+.vscode
+*.log
+README.md
+DEPLOYMENT.md

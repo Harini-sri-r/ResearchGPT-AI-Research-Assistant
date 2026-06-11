@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login | ResearchGPT</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/auth.css">
+    <script src="js/api.js" defer></script>
+    <script src="js/auth.js" defer></script>
+    <script src="js/login.js" defer></script>
+</head>
+<body class="auth-page" data-guest-only="true">
+    <main class="auth-layout">
+        <section class="auth-panel visual-panel" aria-label="ResearchGPT">
+            <a class="brand" href="index.html">
+                <img src="assets/logo.png" onerror="this.src='assets/logo.svg'" alt="" class="brand-logo">
+                <span>ResearchGPT</span>
+            </a>
+            <div class="auth-visual">
+                <div class="document-stack" aria-hidden="true">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </div>
+                <h1>Welcome back</h1>
+                <p>Return to your papers, saved searches, and AI research conversations.</p>
+            </div>
+        </section>
+
+        <section class="auth-panel form-panel" aria-labelledby="login-title">
+            <div class="form-header">
+                <button class="icon-button" type="button" data-theme-toggle aria-label="Toggle theme"></button>
+                <h2 id="login-title">Login</h2>
+                <p>Use your username or email to continue.</p>
+            </div>
+
+            <form id="loginForm" class="auth-form" novalidate>
+                <label for="username_or_email">Username or email</label>
+                <input id="username_or_email" name="username_or_email" type="text" autocomplete="username" required>
+
+                <label for="password">Password</label>
+                <input id="password" name="password" type="password" autocomplete="current-password" required>
+
+                <div id="loginMessage" class="form-message" role="status" aria-live="polite"></div>
+
+                <button class="button button-primary button-wide" type="submit" data-loading-label="Signing in">
+                    <span class="button-label">Login</span>
+                    <span class="spinner" aria-hidden="true"></span>
+                </button>
+            </form>
+
+            <p class="auth-switch">
+                New to ResearchGPT?
+                <a href="register.html">Create an account</a>
+            </p>
+        </section>
+    </main>
+</body>
+</html>

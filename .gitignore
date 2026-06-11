@@ -1,20 +1,26 @@
-# Virtual Environment
+# Virtual environments
 .venv/
 venv/
 
-# Python Cache
+# Python cache
 __pycache__/
+**/__pycache__/
+**pycache**/
 *.pyc
 
 # ChromaDB
 chroma_db/
+chromadb/
 
 # Uploaded PDFs
 ResearchGPT/papers/
+papers/
 papers/user_*/
 
 # Environment Variables
 .env
+.env.local
+.env.*.local
 
 # VS Code
 .vscode/
