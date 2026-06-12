@@ -6,7 +6,7 @@
     const API_BASE = (
         window.RESEARCHGPT_API_BASE ||
         localStorage.getItem(API_BASE_KEY) ||
-        "http://localhost:8000"
+        "https://researchgpt-backend-t2ga.onrender.com"
     ).replace(/\/+$/, "");
 
     const STATUS_MESSAGES = {
