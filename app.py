@@ -165,6 +165,8 @@ def debug_research_import(
             "chromadb_path": research.CHROMADB_PATH,
             "embedding_model": research.EMBEDDING_MODEL_NAME,
             "embedding_model_loaded": research.is_embedding_model_loaded(),
+            "ollama_base_url": research.OLLAMA_BASE_URL,
+            "ollama_model": research.OLLAMA_MODEL,
         }
     except Exception as error:
         log_upload_exception("debug research import failed", error)
@@ -531,7 +533,7 @@ def ask_question(
 
     try:
         from research import (
-            GeminiGenerationError,
+            OllamaGenerationError,
             answer_question,
             summarize_paper,
             compare_papers,
@@ -608,7 +610,7 @@ def ask_question(
 
         else:
             result = answer_question(question, user_id=current_user.id)
-    except GeminiGenerationError as error:
+    except OllamaGenerationError as error:
         return error_response(
             status_code=error.status_code,
             message=error.message,

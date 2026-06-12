@@ -14,4 +14,3 @@ langchain-text-splitters==1.1.2
 langchain-community==0.4.2
 sentence-transformers==5.5.1
 requests==2.34.2
-google-generativeai==0.8.6

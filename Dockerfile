@@ -7,8 +7,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     HF_HOME=/app/.cache/huggingface \
     SENTENCE_TRANSFORMERS_HOME=/app/.cache/sentence-transformers \
     EMBEDDING_MODEL_NAME=all-MiniLM-L6-v2 \
-    GEMINI_MODEL=gemini-2.5-flash \
-    GEMINI_TIMEOUT_SECONDS=120 \
+    OLLAMA_BASE_URL=http://localhost:11434 \
+    OLLAMA_MODEL=llama3 \
+    OLLAMA_TIMEOUT_SECONDS=120 \
+    OLLAMA_TEMPERATURE=0.2 \
+    OLLAMA_TOP_P=0.95 \
+    OLLAMA_NUM_PREDICT=2048 \
     NLTK_DATA=/usr/local/share/nltk_data
 
 WORKDIR /app

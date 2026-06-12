@@ -32,15 +32,24 @@ python -c "import secrets; print(secrets.token_urlsafe(64))"
 DATABASE_URL=postgresql://researchgpt_user:your-postgres-password@postgres:5432/researchgpt_db
 ```
 
-5. Add your Gemini API key from Google AI Studio:
+5. Configure Ollama. The default local setup expects Ollama on `http://localhost:11434`:
 
 ```env
-GEMINI_API_KEY=your-gemini-api-key
-GEMINI_MODEL=gemini-2.5-flash
-GEMINI_TIMEOUT_SECONDS=120
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=llama3
+OLLAMA_TIMEOUT_SECONDS=120
+OLLAMA_TEMPERATURE=0.2
+OLLAMA_TOP_P=0.95
+OLLAMA_NUM_PREDICT=2048
 ```
 
-Keep the Gemini API key in environment variables only. Do not hardcode it in source files or Docker images.
+Install Ollama, start it locally, and pull one model before asking research questions:
+
+```bash
+ollama pull llama3
+```
+
+You can also use models such as `mistral` or `qwen2.5` by changing `OLLAMA_MODEL` and pulling that model first.
 
 ## Docker Commands
 
@@ -144,12 +153,13 @@ Docker Compose mounts that path to the `chromadb_data` volume. Uploaded PDFs are
 2. Create a PostgreSQL database in Render.
 3. Create a Web Service from the repository.
 4. Use Docker as the runtime.
-5. Add environment variables from `.env.example` in Render's dashboard, including `GEMINI_API_KEY`.
+5. Add environment variables from `.env.example` in Render's dashboard.
 6. Set `DATABASE_URL` to the Render PostgreSQL internal connection string.
-7. Add persistent disk storage if you want uploaded PDFs and ChromaDB data to survive deploys:
+7. Make sure the backend can reach an Ollama server from Render, or deploy Ollama on the same private network. A purely offline local setup is recommended for this project.
+8. Add persistent disk storage if you want uploaded PDFs and ChromaDB data to survive deploys:
    - Mount path: `/app/papers`
    - Mount path: `/app/chromadb`
-8. Deploy and verify:
+9. Deploy and verify:
 
 ```bash
 curl https://your-render-service.onrender.com/api/health
@@ -169,7 +179,7 @@ Use Vercel for the static frontend and keep the FastAPI backend on Render, Railw
 </script>
 ```
 
-4. Keep `GEMINI_API_KEY`, PostgreSQL credentials, JWT secrets, `/app/papers`, and `/app/chromadb` on the backend host only.
+4. Keep Ollama access, PostgreSQL credentials, JWT secrets, `/app/papers`, and `/app/chromadb` on the backend host only.
 
 ## Railway Deployment
 

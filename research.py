@@ -31,10 +31,10 @@ from nltk.corpus import stopwords
 from dotenv import load_dotenv
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from sentence_transformers import SentenceTransformer
-import google.generativeai as genai
-from google.api_core import exceptions as google_api_exceptions
+import requests
 from requests.exceptions import (
     ConnectionError as RequestsConnectionError,
+    HTTPError as RequestsHTTPError,
     RequestException,
     Timeout as RequestsTimeout,
 )
@@ -54,15 +54,37 @@ load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent
 CHROMADB_PATH = os.getenv("CHROMADB_PATH", str(BASE_DIR / "chromadb"))
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3")
 EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME", "all-MiniLM-L6-v2")
 NOT_FOUND_RESPONSE = "Information not found in the uploaded papers."
 _embedding_model = None
 
+
+def _get_int_env(name, default):
+    try:
+        return int(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+
+
+def _get_float_env(name, default):
+    try:
+        return float(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+
+
 try:
-    GEMINI_TIMEOUT_SECONDS = int(os.getenv("GEMINI_TIMEOUT_SECONDS", "120"))
+    OLLAMA_TIMEOUT_SECONDS = int(os.getenv("OLLAMA_TIMEOUT_SECONDS", "120"))
 except ValueError:
-    GEMINI_TIMEOUT_SECONDS = 120
+    OLLAMA_TIMEOUT_SECONDS = 120
+
+OLLAMA_OPTIONS = {
+    "temperature": _get_float_env("OLLAMA_TEMPERATURE", 0.2),
+    "top_p": _get_float_env("OLLAMA_TOP_P", 0.95),
+    "num_predict": _get_int_env("OLLAMA_NUM_PREDICT", 2048),
+}
 
 
 def _log_step(message):
@@ -163,12 +185,12 @@ def _encode_texts(texts):
         ) from error
 
 
-class GeminiGenerationError(Exception):
+class OllamaGenerationError(Exception):
     def __init__(
         self,
         message,
         status_code=503,
-        error_type="gemini_api_error",
+        error_type="ollama_api_error",
     ):
         super().__init__(message)
         self.message = message
@@ -176,147 +198,160 @@ class GeminiGenerationError(Exception):
         self.error_type = error_type
 
 
-class GeminiLLM:
+def _build_ollama_payload(prompt, model_name, options):
+    return {
+        "model": model_name,
+        "prompt": prompt,
+        "stream": False,
+        "options": options,
+    }
+
+
+def _parse_ollama_response(response):
+    try:
+        response_data = response.json()
+        answer = (response_data.get("response") or "").strip()
+    except (AttributeError, ValueError) as error:
+        _log_exception("Ollama response parsing failed", error)
+        raise OllamaGenerationError(
+            "Ollama did not return a usable answer. Please try again.",
+            status_code=502,
+            error_type="ollama_empty_response",
+        ) from error
+
+    if not answer:
+        raise OllamaGenerationError(
+            "Ollama did not return a usable answer. Please try again.",
+            status_code=502,
+            error_type="ollama_empty_response",
+        )
+
+    return answer
+
+
+def _create_ollama_http_error(error, model_name):
+    response = error.response
+    status_code = response.status_code if response is not None else 502
+    detail = ""
+
+    if response is not None:
+        try:
+            error_data = response.json()
+            detail = error_data.get("error", "")
+        except ValueError:
+            detail = response.text.strip()
+
+    _log_exception("Ollama HTTP error", error)
+
+    if status_code == 404:
+        return OllamaGenerationError(
+            f"Ollama model '{model_name}' is not available. "
+            f"Run: ollama pull {model_name}",
+            status_code=503,
+            error_type="ollama_model_missing",
+        )
+
+    message = "Ollama API request failed."
+    if detail:
+        message = f"{message} {detail}"
+
+    return OllamaGenerationError(
+        message,
+        status_code=502 if status_code >= 500 else status_code,
+        error_type="ollama_api_error",
+    )
+
+
+def _post_ollama_generate(
+    session,
+    base_url,
+    payload,
+    timeout_seconds,
+    model_name,
+):
+    try:
+        response = session.post(
+            f"{base_url}/api/generate",
+            json=payload,
+            timeout=timeout_seconds,
+        )
+        response.raise_for_status()
+        return response
+    except (RequestsTimeout, TimeoutError) as error:
+        _log_exception("Ollama request timed out", error)
+        raise OllamaGenerationError(
+            "Ollama request timed out. Please try again.",
+            status_code=504,
+            error_type="ollama_timeout",
+        ) from error
+    except RequestsConnectionError as error:
+        _log_exception("Ollama connection failed", error)
+        raise OllamaGenerationError(
+            f"Unable to connect to Ollama at {base_url}. "
+            "Start Ollama locally and pull the configured model first.",
+            status_code=503,
+            error_type="ollama_connection_error",
+        ) from error
+    except RequestsHTTPError as error:
+        raise _create_ollama_http_error(error, model_name) from error
+    except RequestException as error:
+        _log_exception("Ollama request failed", error)
+        raise OllamaGenerationError(
+            "Ollama request failed. Please check the local Ollama service.",
+            status_code=502,
+            error_type="ollama_api_error",
+        ) from error
+    except OSError as error:
+        _log_exception("Ollama network failure", error)
+        raise OllamaGenerationError(
+            "Network error while contacting Ollama.",
+            status_code=503,
+            error_type="ollama_network_error",
+        ) from error
+    except Exception as error:
+        _log_exception("Ollama unexpected failure", error)
+        raise OllamaGenerationError(
+            "Ollama is unavailable right now. Please try again later.",
+            status_code=503,
+            error_type="ollama_unavailable",
+        ) from error
+
+
+class OllamaLLM:
     def __init__(
         self,
+        base_url,
         model_name,
         timeout_seconds,
+        options=None,
     ):
+        self.base_url = base_url.rstrip("/")
         self.model_name = model_name
         self.timeout_seconds = timeout_seconds
-        self._model = None
-
-    def _get_model(self):
-        api_key = (os.getenv("GEMINI_API_KEY") or "").strip()
-        if not api_key:
-            raise GeminiGenerationError(
-                "Gemini API key is not configured. Set GEMINI_API_KEY in your environment.",
-                status_code=503,
-                error_type="gemini_api_key_missing",
-            )
-
-        if self._model is None:
-            genai.configure(
-                api_key=api_key,
-                transport="rest",
-            )
-            self._model = genai.GenerativeModel(
-                self.model_name,
-                generation_config={
-                    "temperature": 0.2,
-                    "top_p": 0.95,
-                    "max_output_tokens": 2048,
-                },
-            )
-
-        return self._model
+        self.options = options or {}
+        self._session = requests.Session()
 
     def invoke(self, prompt):
-        try:
-            response = self._get_model().generate_content(
-                prompt,
-                request_options={
-                    "timeout": self.timeout_seconds
-                },
-            )
-        except (
-            google_api_exceptions.Unauthenticated,
-            google_api_exceptions.PermissionDenied,
-        ) as error:
-            _log_exception("Gemini authentication failed", error)
-            raise GeminiGenerationError(
-                "Gemini API key is invalid or does not have access to this model.",
-                status_code=401,
-                error_type="gemini_invalid_api_key",
-            ) from error
-        except google_api_exceptions.ResourceExhausted as error:
-            _log_exception("Gemini quota exceeded", error)
-            raise GeminiGenerationError(
-                "Gemini quota or rate limit exceeded. Please try again later.",
-                status_code=429,
-                error_type="gemini_quota_exceeded",
-            ) from error
-        except google_api_exceptions.DeadlineExceeded as error:
-            _log_exception("Gemini request timed out", error)
-            raise GeminiGenerationError(
-                "Gemini request timed out. Please try again.",
-                status_code=504,
-                error_type="gemini_timeout",
-            ) from error
-        except google_api_exceptions.ServiceUnavailable as error:
-            _log_exception("Gemini API unavailable", error)
-            raise GeminiGenerationError(
-                "Gemini API is temporarily unavailable. Please try again later.",
-                status_code=503,
-                error_type="gemini_unavailable",
-            ) from error
-        except google_api_exceptions.RetryError as error:
-            _log_exception("Gemini retry failed", error)
-            cause = getattr(error, "cause", None) or error.__cause__
-            if isinstance(cause, google_api_exceptions.DeadlineExceeded):
-                raise GeminiGenerationError(
-                    "Gemini request timed out. Please try again.",
-                    status_code=504,
-                    error_type="gemini_timeout",
-                ) from error
-
-            raise GeminiGenerationError(
-                "Gemini API is temporarily unavailable. Please try again later.",
-                status_code=503,
-                error_type="gemini_unavailable",
-            ) from error
-        except (RequestsTimeout, TimeoutError) as error:
-            _log_exception("Gemini network timeout", error)
-            raise GeminiGenerationError(
-                "Gemini request timed out. Please try again.",
-                status_code=504,
-                error_type="gemini_timeout",
-            ) from error
-        except (RequestsConnectionError, RequestException, OSError) as error:
-            _log_exception("Gemini network failure", error)
-            raise GeminiGenerationError(
-                "Network error while contacting Gemini. Please check your connection and try again.",
-                status_code=503,
-                error_type="gemini_network_error",
-            ) from error
-        except google_api_exceptions.GoogleAPICallError as error:
-            _log_exception("Gemini API call failed", error)
-            raise GeminiGenerationError(
-                "Gemini API request failed. Please try again later.",
-                status_code=502,
-                error_type="gemini_api_error",
-            ) from error
-        except Exception as error:
-            _log_exception("Gemini unexpected failure", error)
-            raise GeminiGenerationError(
-                "Gemini API is unavailable right now. Please try again later.",
-                status_code=503,
-                error_type="gemini_unavailable",
-            ) from error
-
-        try:
-            answer = response.text.strip()
-        except (AttributeError, ValueError) as error:
-            _log_exception("Gemini response parsing failed", error)
-            raise GeminiGenerationError(
-                "Gemini did not return a usable answer. Please try again.",
-                status_code=502,
-                error_type="gemini_empty_response",
-            ) from error
-
-        if not answer:
-            raise GeminiGenerationError(
-                "Gemini did not return a usable answer. Please try again.",
-                status_code=502,
-                error_type="gemini_empty_response",
-            )
-
-        return answer
+        payload = _build_ollama_payload(
+            prompt=prompt,
+            model_name=self.model_name,
+            options=self.options,
+        )
+        response = _post_ollama_generate(
+            session=self._session,
+            base_url=self.base_url,
+            payload=payload,
+            timeout_seconds=self.timeout_seconds,
+            model_name=self.model_name,
+        )
+        return _parse_ollama_response(response)
 
 
-llm = GeminiLLM(
-    model_name=GEMINI_MODEL,
-    timeout_seconds=GEMINI_TIMEOUT_SECONDS,
+llm = OllamaLLM(
+    base_url=OLLAMA_BASE_URL,
+    model_name=OLLAMA_MODEL,
+    timeout_seconds=OLLAMA_TIMEOUT_SECONDS,
+    options=OLLAMA_OPTIONS,
 )
 
 splitter = RecursiveCharacterTextSplitter(
