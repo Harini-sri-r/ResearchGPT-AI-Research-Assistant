@@ -22,6 +22,7 @@ import hashlib
 import os
 import nltk
 import chromadb
+import traceback
 from pathlib import Path
 
 from nltk.tokenize import word_tokenize
@@ -60,6 +61,68 @@ try:
     GEMINI_TIMEOUT_SECONDS = int(os.getenv("GEMINI_TIMEOUT_SECONDS", "120"))
 except ValueError:
     GEMINI_TIMEOUT_SECONDS = 120
+
+
+def _log_step(message):
+    print(f"[ResearchGPT upload] {message}", flush=True)
+
+
+def _log_exception(context, error):
+    print(
+        f"[ResearchGPT upload][ERROR] {context}: "
+        f"{type(error).__name__}: {error}",
+        flush=True,
+    )
+    traceback.print_exc()
+
+
+class ResearchIndexingError(Exception):
+    def __init__(
+        self,
+        message,
+        status_code=500,
+        error_type="research_indexing_error",
+    ):
+        super().__init__(message)
+        self.message = message
+        self.status_code = status_code
+        self.error_type = error_type
+
+
+class PDFExtractionError(ResearchIndexingError):
+    def __init__(self, message):
+        super().__init__(
+            message=message,
+            status_code=400,
+            error_type="pdf_extraction_error",
+        )
+
+
+class NoExtractableTextError(ResearchIndexingError):
+    def __init__(self, message):
+        super().__init__(
+            message=message,
+            status_code=400,
+            error_type="pdf_no_extractable_text",
+        )
+
+
+class EmbeddingGenerationError(ResearchIndexingError):
+    def __init__(self, message):
+        super().__init__(
+            message=message,
+            status_code=503,
+            error_type="embedding_generation_error",
+        )
+
+
+class ChromaDBIndexError(ResearchIndexingError):
+    def __init__(self, message):
+        super().__init__(
+            message=message,
+            status_code=500,
+            error_type="chromadb_index_error",
+        )
 
 
 class GeminiGenerationError(Exception):
@@ -122,30 +185,35 @@ class GeminiLLM:
             google_api_exceptions.Unauthenticated,
             google_api_exceptions.PermissionDenied,
         ) as error:
+            _log_exception("Gemini authentication failed", error)
             raise GeminiGenerationError(
                 "Gemini API key is invalid or does not have access to this model.",
                 status_code=401,
                 error_type="gemini_invalid_api_key",
             ) from error
         except google_api_exceptions.ResourceExhausted as error:
+            _log_exception("Gemini quota exceeded", error)
             raise GeminiGenerationError(
                 "Gemini quota or rate limit exceeded. Please try again later.",
                 status_code=429,
                 error_type="gemini_quota_exceeded",
             ) from error
         except google_api_exceptions.DeadlineExceeded as error:
+            _log_exception("Gemini request timed out", error)
             raise GeminiGenerationError(
                 "Gemini request timed out. Please try again.",
                 status_code=504,
                 error_type="gemini_timeout",
             ) from error
         except google_api_exceptions.ServiceUnavailable as error:
+            _log_exception("Gemini API unavailable", error)
             raise GeminiGenerationError(
                 "Gemini API is temporarily unavailable. Please try again later.",
                 status_code=503,
                 error_type="gemini_unavailable",
             ) from error
         except google_api_exceptions.RetryError as error:
+            _log_exception("Gemini retry failed", error)
             cause = getattr(error, "cause", None) or error.__cause__
             if isinstance(cause, google_api_exceptions.DeadlineExceeded):
                 raise GeminiGenerationError(
@@ -160,24 +228,28 @@ class GeminiLLM:
                 error_type="gemini_unavailable",
             ) from error
         except (RequestsTimeout, TimeoutError) as error:
+            _log_exception("Gemini network timeout", error)
             raise GeminiGenerationError(
                 "Gemini request timed out. Please try again.",
                 status_code=504,
                 error_type="gemini_timeout",
             ) from error
         except (RequestsConnectionError, RequestException, OSError) as error:
+            _log_exception("Gemini network failure", error)
             raise GeminiGenerationError(
                 "Network error while contacting Gemini. Please check your connection and try again.",
                 status_code=503,
                 error_type="gemini_network_error",
             ) from error
         except google_api_exceptions.GoogleAPICallError as error:
+            _log_exception("Gemini API call failed", error)
             raise GeminiGenerationError(
                 "Gemini API request failed. Please try again later.",
                 status_code=502,
                 error_type="gemini_api_error",
             ) from error
         except Exception as error:
+            _log_exception("Gemini unexpected failure", error)
             raise GeminiGenerationError(
                 "Gemini API is unavailable right now. Please try again later.",
                 status_code=503,
@@ -187,6 +259,7 @@ class GeminiLLM:
         try:
             answer = response.text.strip()
         except (AttributeError, ValueError) as error:
+            _log_exception("Gemini response parsing failed", error)
             raise GeminiGenerationError(
                 "Gemini did not return a usable answer. Please try again.",
                 status_code=502,
@@ -214,11 +287,14 @@ splitter = RecursiveCharacterTextSplitter(
 )
 
 try:
+    _log_step("Loading SentenceTransformer model: all-MiniLM-L6-v2")
     model = SentenceTransformer(
         "all-MiniLM-L6-v2",
         local_files_only=False
     )
+    _log_step("SentenceTransformer model loaded")
 except Exception as error:
+    _log_exception("SentenceTransformer model initialization failed", error)
     raise RuntimeError(
         "Unable to load the SentenceTransformer model locally. "
         "If you are offline, make sure the model is cached or run once with internet access "
@@ -417,23 +493,57 @@ def _get_paper_text(filename, user_id=None):
 
 
 def _extract_pdf_text_and_chunks(file_path):
-    reader = PdfReader(str(file_path))
+    file_path = Path(file_path)
+    _log_step(f"Opening PDF: {file_path}")
+
+    try:
+        reader = PdfReader(str(file_path))
+        _log_step(f"PDF opened: pages={len(reader.pages)}")
+    except Exception as error:
+        _log_exception(f"PDF open failed for {file_path}", error)
+        raise PDFExtractionError(
+            "Unable to open the uploaded PDF. The file may be corrupted or encrypted."
+        ) from error
+
     paper_text = ""
     extracted_chunks = []
     extracted_pages = []
 
     for page_num, page in enumerate(reader.pages, start=1):
-        page_text = page.extract_text()
+        try:
+            _log_step(f"Extracting text from page {page_num}")
+            page_text = page.extract_text()
+        except Exception as error:
+            _log_exception(f"Text extraction failed on page {page_num}", error)
+            raise PDFExtractionError(
+                f"Unable to extract text from page {page_num} of the uploaded PDF."
+            ) from error
 
         if not page_text:
+            _log_step(f"No text extracted from page {page_num}")
             continue
 
         paper_text += page_text + "\n"
-        doc_chunks = splitter.split_text(page_text)
+
+        try:
+            doc_chunks = splitter.split_text(page_text)
+            _log_step(
+                f"Chunks created from page {page_num}: count={len(doc_chunks)}"
+            )
+        except Exception as error:
+            _log_exception(f"Chunking failed on page {page_num}", error)
+            raise PDFExtractionError(
+                f"Unable to chunk extracted text from page {page_num}."
+            ) from error
 
         for chunk in doc_chunks:
             extracted_chunks.append(chunk)
             extracted_pages.append(page_num)
+
+    _log_step(
+        "Text extraction completed: "
+        f"characters={len(paper_text)}, chunks={len(extracted_chunks)}"
+    )
 
     return paper_text, extracted_chunks, extracted_pages
 
@@ -441,19 +551,56 @@ def _extract_pdf_text_and_chunks(file_path):
 def index_uploaded_paper(file_path, filename, user_id):
     file_path = Path(file_path)
     filename = Path(filename).name
-    paper_text, extracted_chunks, extracted_pages = _extract_pdf_text_and_chunks(
-        file_path
+    _log_step(
+        f"index_uploaded_paper started: user_id={user_id}, "
+        f"filename={filename}, path={file_path}"
     )
+
+    try:
+        paper_text, extracted_chunks, extracted_pages = _extract_pdf_text_and_chunks(
+            file_path
+        )
+    except ResearchIndexingError:
+        raise
+    except Exception as error:
+        _log_exception("Unexpected PDF extraction failure", error)
+        raise PDFExtractionError(
+            "Unable to process the uploaded PDF."
+        ) from error
 
     if not extracted_chunks:
-        raise ValueError("No extractable text found in uploaded PDF.")
+        _log_step("No chunks created because no text was extracted")
+        raise NoExtractableTextError(
+            "No extractable text found in the uploaded PDF. "
+            "Please upload a text-based PDF instead of a scanned image PDF."
+        )
 
-    embeddings = model.encode(extracted_chunks)
+    try:
+        _log_step(f"Generating embeddings: chunks={len(extracted_chunks)}")
+        embeddings = model.encode(extracted_chunks)
+        _log_step(f"Embeddings generated: count={len(embeddings)}")
+    except Exception as error:
+        _log_exception("SentenceTransformer model.encode failed", error)
+        raise EmbeddingGenerationError(
+            "Unable to generate embeddings for the uploaded PDF."
+        ) from error
+
     filename_hash = hashlib.sha256(filename.encode("utf-8")).hexdigest()[:16]
 
-    collection.delete(
-        where=_user_filename_filter(user_id, filename)
-    )
+    try:
+        _log_step(
+            f"Deleting old ChromaDB chunks for user_id={user_id}, "
+            f"filename={filename}"
+        )
+        collection.delete(
+            where=_user_filename_filter(user_id, filename)
+        )
+        _log_step("Old ChromaDB chunks deleted")
+    except Exception as error:
+        _log_exception("ChromaDB delete failed", error)
+        raise ChromaDBIndexError(
+            "Unable to prepare the search index for this PDF."
+        ) from error
 
     ids = []
     metadatas = []
@@ -477,17 +624,29 @@ def index_uploaded_paper(file_path, filename, user_id):
             }
         )
 
-    collection.upsert(
-        ids=ids,
-        documents=extracted_chunks,
-        embeddings=[
-            embedding.tolist()
-            for embedding in embeddings
-        ],
-        metadatas=metadatas,
-    )
+    try:
+        _log_step(f"Starting ChromaDB upsert: ids={len(ids)}")
+        collection.upsert(
+            ids=ids,
+            documents=extracted_chunks,
+            embeddings=[
+                embedding.tolist()
+                for embedding in embeddings
+            ],
+            metadatas=metadatas,
+        )
+        _log_step("ChromaDB upsert completed")
+    except Exception as error:
+        _log_exception("ChromaDB upsert failed", error)
+        raise ChromaDBIndexError(
+            "Unable to store this PDF in the search index."
+        ) from error
 
     user_papers[_paper_key(user_id, filename)] = paper_text
+    _log_step(
+        f"index_uploaded_paper completed: filename={filename}, "
+        f"chunks={len(extracted_chunks)}"
+    )
 
     return len(extracted_chunks)
 

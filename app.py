@@ -1,6 +1,7 @@
 
 from pathlib import Path
 from time import perf_counter
+import traceback
 
 from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -78,6 +79,19 @@ def error_response(
     )
 
 
+def log_upload_step(message):
+    print(f"[ResearchGPT upload] {message}", flush=True)
+
+
+def log_upload_exception(context, error):
+    print(
+        f"[ResearchGPT upload][ERROR] {context}: "
+        f"{type(error).__name__}: {error}",
+        flush=True,
+    )
+    traceback.print_exc()
+
+
 @app.exception_handler(HTTPException)
 async def http_exception_handler(
     request: Request,
@@ -109,6 +123,13 @@ async def unhandled_exception_handler(
     request: Request,
     exc: Exception,
 ):
+    print(
+        f"[ResearchGPT][ERROR] Unhandled exception for "
+        f"{request.method} {request.url.path}: {type(exc).__name__}: {exc}",
+        flush=True,
+    )
+    traceback.print_exc()
+
     return error_response(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         message="Internal server error.",
@@ -604,49 +625,110 @@ async def upload_pdf(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    log_upload_step(
+        f"file received: original_filename={file.filename!r}, "
+        f"content_type={file.content_type!r}, user_id={current_user.id}"
+    )
 
     filename = Path(file.filename or "").name
 
-    if not filename.lower().endswith(".pdf"):
+    if not filename:
+        log_upload_step("upload rejected: missing filename")
         raise HTTPException(
-            status_code=400,
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Uploaded file must include a filename.",
+        )
+
+    if not filename.lower().endswith(".pdf"):
+        log_upload_step(f"upload rejected: non-PDF filename={filename}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail="Please upload a PDF file."
         )
 
     user_papers_dir = PAPERS_DIR / f"user_{current_user.id}"
-    user_papers_dir.mkdir(
-        parents=True,
-        exist_ok=True
-    )
+    try:
+        log_upload_step(f"creating user papers folder: {user_papers_dir}")
+        user_papers_dir.mkdir(
+            parents=True,
+            exist_ok=True
+        )
+    except Exception as error:
+        log_upload_exception("Unable to create user papers folder", error)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to prepare upload storage.",
+        ) from error
 
     file_path = user_papers_dir / filename
 
-    with file_path.open(
-        "wb"
-    ) as buffer:
+    try:
+        log_upload_step(f"saving uploaded file to disk: {file_path}")
+        with file_path.open(
+            "wb"
+        ) as buffer:
 
-        shutil.copyfileobj(
-            file.file,
-            buffer
+            shutil.copyfileobj(
+                file.file,
+                buffer
+            )
+        log_upload_step(
+            f"file saved: path={file_path}, size_bytes={file_path.stat().st_size}"
         )
+    except Exception as error:
+        log_upload_exception("Unable to save uploaded file", error)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to save uploaded PDF.",
+        ) from error
 
     try:
-        from research import index_uploaded_paper
-
-        index_uploaded_paper(
-            file_path=file_path,
-            filename=filename,
-            user_id=current_user.id,
-        )
+        log_upload_step("importing research.index_uploaded_paper")
+        from research import ResearchIndexingError, index_uploaded_paper
+        log_upload_step("research.index_uploaded_paper imported")
     except ModuleNotFoundError as error:
+        log_upload_exception("Research engine dependency missing", error)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Research engine dependency missing: {error.name}",
         ) from error
     except Exception as error:
+        log_upload_exception("Research engine import failed", error)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Research engine failed to initialize: {type(error).__name__}: {error}",
+        ) from error
+
+    try:
+        log_upload_step(
+            f"calling index_uploaded_paper: filename={filename}, "
+            f"user_id={current_user.id}"
+        )
+        chunk_count = index_uploaded_paper(
+            file_path=file_path,
+            filename=filename,
+            user_id=current_user.id,
+        )
+        log_upload_step(
+            f"index_uploaded_paper returned successfully: chunks={chunk_count}"
+        )
+    except ResearchIndexingError as error:
+        log_upload_exception("Research indexing failed", error)
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.message,
+        ) from error
+    except ValueError as error:
+        log_upload_exception("Research indexing validation failed", error)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(error),
+        ) from error
+    except Exception as error:
+        log_upload_exception("Unexpected research indexing failure", error)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Unable to index uploaded paper: {error}",
+            detail=f"Unable to index uploaded paper: {type(error).__name__}: {error}",
         ) from error
 
     paper = UploadedPaper(
@@ -655,8 +737,20 @@ async def upload_pdf(
         filepath=str(file_path)
     )
 
-    db.add(paper)
-    db.commit()
+    try:
+        log_upload_step(f"saving uploaded paper row to PostgreSQL: {filename}")
+        db.add(paper)
+        db.commit()
+        db.refresh(paper)
+        log_upload_step(f"PostgreSQL save completed: paper_id={paper.id}")
+    except Exception as error:
+        db.rollback()
+        log_upload_exception("Unable to save uploaded paper row", error)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="PDF was indexed but the upload record could not be saved.",
+        ) from error
+
     return {
         "message":
         f"{filename} uploaded successfully"
