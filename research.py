@@ -55,7 +55,9 @@ load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent
 CHROMADB_PATH = os.getenv("CHROMADB_PATH", str(BASE_DIR / "chromadb"))
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME", "all-MiniLM-L6-v2")
 NOT_FOUND_RESPONSE = "Information not found in the uploaded papers."
+_embedding_model = None
 
 try:
     GEMINI_TIMEOUT_SECONDS = int(os.getenv("GEMINI_TIMEOUT_SECONDS", "120"))
@@ -123,6 +125,42 @@ class ChromaDBIndexError(ResearchIndexingError):
             status_code=500,
             error_type="chromadb_index_error",
         )
+
+
+def is_embedding_model_loaded():
+    return _embedding_model is not None
+
+
+def _get_embedding_model():
+    global _embedding_model
+
+    if _embedding_model is None:
+        try:
+            _log_step(f"Loading SentenceTransformer model: {EMBEDDING_MODEL_NAME}")
+            _embedding_model = SentenceTransformer(
+                EMBEDDING_MODEL_NAME,
+                local_files_only=False
+            )
+            _log_step("SentenceTransformer model loaded")
+        except Exception as error:
+            _log_exception("SentenceTransformer model initialization failed", error)
+            raise EmbeddingGenerationError(
+                "Unable to load the embedding model."
+            ) from error
+
+    return _embedding_model
+
+
+def _encode_texts(texts):
+    try:
+        return _get_embedding_model().encode(texts)
+    except ResearchIndexingError:
+        raise
+    except Exception as error:
+        _log_exception("SentenceTransformer model.encode failed", error)
+        raise EmbeddingGenerationError(
+            "Unable to generate embeddings."
+        ) from error
 
 
 class GeminiGenerationError(Exception):
@@ -286,21 +324,6 @@ splitter = RecursiveCharacterTextSplitter(
     chunk_overlap=50
 )
 
-try:
-    _log_step("Loading SentenceTransformer model: all-MiniLM-L6-v2")
-    model = SentenceTransformer(
-        "all-MiniLM-L6-v2",
-        local_files_only=False
-    )
-    _log_step("SentenceTransformer model loaded")
-except Exception as error:
-    _log_exception("SentenceTransformer model initialization failed", error)
-    raise RuntimeError(
-        "Unable to load the SentenceTransformer model locally. "
-        "If you are offline, make sure the model is cached or run once with internet access "
-        "and set HF_TOKEN if needed."
-    ) from error
-
 # ===================================================================
 # PDF LOADING WITH VALIDATION
 # ===================================================================
@@ -419,7 +442,7 @@ print("\n" + "=" * 70)
 print("STEP 4 : EMBEDDINGS")
 print("=" * 70)
 
-chunk_embeddings = model.encode(chunks) if chunks else []
+chunk_embeddings = _encode_texts(chunks) if chunks else []
 
 # ===================================================================
 # CHROMADB WITH CHUNK IDS
@@ -577,8 +600,10 @@ def index_uploaded_paper(file_path, filename, user_id):
 
     try:
         _log_step(f"Generating embeddings: chunks={len(extracted_chunks)}")
-        embeddings = model.encode(extracted_chunks)
+        embeddings = _encode_texts(extracted_chunks)
         _log_step(f"Embeddings generated: count={len(embeddings)}")
+    except ResearchIndexingError:
+        raise
     except Exception as error:
         _log_exception("SentenceTransformer model.encode failed", error)
         raise EmbeddingGenerationError(
@@ -956,7 +981,7 @@ def answer_question(question, user_id=None):
     if user_id is None:
         raise ValueError("user_id is required for document retrieval.")
 
-    query_embedding = model.encode(question)
+    query_embedding = _encode_texts([question])[0]
 
     query_kwargs = {
         "query_embeddings": [query_embedding.tolist()],

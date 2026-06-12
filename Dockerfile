@@ -4,6 +4,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    HF_HOME=/app/.cache/huggingface \
+    SENTENCE_TRANSFORMERS_HOME=/app/.cache/sentence-transformers \
+    EMBEDDING_MODEL_NAME=all-MiniLM-L6-v2 \
     GEMINI_MODEL=gemini-2.5-flash \
     GEMINI_TIMEOUT_SECONDS=120 \
     NLTK_DATA=/usr/local/share/nltk_data
@@ -26,6 +29,10 @@ RUN pip install -r requirements.txt
 
 # Download NLTK data
 RUN python -m nltk.downloader -d /usr/local/share/nltk_data punkt punkt_tab stopwords
+
+# Download the embedding model at build time so uploads do not fetch it during a request
+RUN mkdir -p /app/.cache/huggingface /app/.cache/sentence-transformers \
+    && python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
 
 COPY . .
 

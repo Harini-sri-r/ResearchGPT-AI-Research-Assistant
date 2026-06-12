@@ -150,6 +150,30 @@ def health_check():
     }
 
 
+@app.get("/debug/research-import", tags=["Debug"])
+def debug_research_import(
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        log_upload_step(
+            f"debug research import requested by user_id={current_user.id}"
+        )
+        import research
+
+        return {
+            "message": "research.py imported successfully",
+            "chromadb_path": research.CHROMADB_PATH,
+            "embedding_model": research.EMBEDDING_MODEL_NAME,
+            "embedding_model_loaded": research.is_embedding_model_loaded(),
+        }
+    except Exception as error:
+        log_upload_exception("debug research import failed", error)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"research.py import failed: {type(error).__name__}: {error}",
+        ) from error
+
+
 @app.post(
     "/register",
     response_model=UserResponse,
