@@ -3,8 +3,11 @@ window.ResearchGPT.onReady(() => {
 
     const {
         apiFetch,
+        buildApiUrl,
         escapeHTML,
+        extractApiMessage,
         formatDate,
+        getToken,
         isLoggedIn,
         showInlineMessage,
         showToast,
@@ -54,14 +57,126 @@ window.ResearchGPT.onReady(() => {
                 <p>Uploaded ${formatDate(paper.upload_time)}</p>
             </div>
             <div class="item-actions">
-                <button class="button button-ghost" type="button" disabled title="This backend exposes paper metadata only.">View</button>
-                <button class="button button-ghost" type="button" disabled title="This backend exposes paper metadata only.">Download</button>
-                <button class="button button-ghost" type="button" disabled title="No delete paper API is available.">Delete</button>
+                <button class="button button-ghost" type="button" data-paper-view="${paper.id}">View</button>
+                <button class="button button-ghost" type="button" data-paper-download="${paper.id}" data-paper-filename="${escapeHTML(paper.filename)}">Download</button>
+                <button class="button button-ghost button-danger" type="button" data-paper-delete="${paper.id}" data-paper-filename="${escapeHTML(paper.filename)}">Delete</button>
                 <button class="button button-primary" type="button" data-favorite-paper="${escapeHTML(paper.filename)}">Favorite</button>
             </div>
         `;
 
         return item;
+    }
+
+    async function fetchPaperBlob(path) {
+        const token = getToken();
+        if (!token) {
+            throw new Error("Please log in to continue.");
+        }
+
+        let response;
+        try {
+            response = await fetch(
+                buildApiUrl(path),
+                {
+                    headers: {
+                        Authorization: `Bearer ${token}`
+                    }
+                }
+            );
+        } catch (error) {
+            throw new Error("Could not reach the API. Make sure the FastAPI server is running.");
+        }
+
+        if (!response.ok) {
+            const text = await response.text();
+            let data = null;
+
+            try {
+                data = text ? JSON.parse(text) : null;
+            } catch (error) {
+                data = { message: text };
+            }
+
+            throw new Error(
+                extractApiMessage(
+                    data,
+                    `Paper request failed with status ${response.status}.`
+                )
+            );
+        }
+
+        return response.blob();
+    }
+
+    async function viewPaper(paperId) {
+        const openedWindow = window.open("about:blank", "_blank");
+        if (openedWindow) {
+            openedWindow.opener = null;
+            openedWindow.document.title = "Opening paper...";
+            openedWindow.document.body.innerHTML = "<p style=\"font-family: system-ui, sans-serif; padding: 1rem;\">Opening paper...</p>";
+        }
+
+        let blob;
+
+        try {
+            blob = await fetchPaperBlob(`/papers/${encodeURIComponent(paperId)}/view`);
+        } catch (error) {
+            if (openedWindow) {
+                openedWindow.close();
+            }
+            throw error;
+        }
+
+        const url = URL.createObjectURL(blob);
+
+        if (!openedWindow) {
+            window.location.href = url;
+        } else {
+            openedWindow.location.href = url;
+        }
+
+        window.setTimeout(() => {
+            URL.revokeObjectURL(url);
+        }, 60000);
+    }
+
+    async function downloadPaper(paperId, filename) {
+        const blob = await fetchPaperBlob(`/papers/${encodeURIComponent(paperId)}/download`);
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+
+        link.href = url;
+        link.download = filename || "paper.pdf";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+
+        window.setTimeout(() => {
+            URL.revokeObjectURL(url);
+        }, 60000);
+    }
+
+    async function deletePaper(paperId, filename) {
+        const confirmed = window.confirm(
+            `Delete "${filename || "this paper"}"? This removes it from your library and search index.`
+        );
+
+        if (!confirmed) {
+            return;
+        }
+
+        const response = await apiFetch(
+            `/papers/${encodeURIComponent(paperId)}`,
+            {
+                method: "DELETE"
+            }
+        );
+
+        showToast(
+            response && response.message ? response.message : "Paper deleted.",
+            "success"
+        );
+        await loadPapers();
     }
 
     function renderPapers(papers) {
@@ -162,25 +277,43 @@ window.ResearchGPT.onReady(() => {
 
     if (uploadedList) {
         uploadedList.addEventListener("click", async (event) => {
-            const button = event.target.closest("[data-favorite-paper]");
+            const button = event.target.closest("button");
             if (!button) {
+                return;
+            }
+
+            const viewId = button.dataset.paperView;
+            const downloadId = button.dataset.paperDownload;
+            const deleteId = button.dataset.paperDelete;
+            const favoritePaper = button.dataset.favoritePaper;
+
+            if (!viewId && !downloadId && !deleteId && !favoritePaper) {
                 return;
             }
 
             button.disabled = true;
 
             try {
-                if (window.ResearchGPTFavorites) {
-                    await window.ResearchGPTFavorites.addFavorite(button.dataset.favoritePaper);
+                if (viewId) {
+                    await viewPaper(viewId);
+                } else if (downloadId) {
+                    await downloadPaper(downloadId, button.dataset.paperFilename);
+                } else if (deleteId) {
+                    await deletePaper(deleteId, button.dataset.paperFilename);
+                } else if (window.ResearchGPTFavorites) {
+                    await window.ResearchGPTFavorites.addFavorite(favoritePaper);
                 } else {
                     await apiFetch("/favorites", {
                         method: "POST",
-                        body: { paper_name: button.dataset.favoritePaper }
+                        body: { paper_name: favoritePaper }
                     });
                     showToast("Favorite added.", "success");
                 }
             } catch (error) {
-                showToast(error.message, error.status === 409 ? "warning" : "error");
+                showToast(
+                    error.message,
+                    error.status === 409 ? "warning" : "error"
+                );
             } finally {
                 button.disabled = false;
             }

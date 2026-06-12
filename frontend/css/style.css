@@ -154,6 +154,15 @@ h3 {
     background: transparent;
 }
 
+.button-danger {
+    color: var(--danger);
+}
+
+.button-danger:hover {
+    border-color: rgba(180, 35, 56, 0.42);
+    box-shadow: 0 12px 30px rgba(180, 35, 56, 0.12);
+}
+
 .button-glass {
     background: rgba(255, 255, 255, 0.18);
     color: #ffffff;

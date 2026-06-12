@@ -32,13 +32,15 @@ python -c "import secrets; print(secrets.token_urlsafe(64))"
 DATABASE_URL=postgresql://researchgpt_user:your-postgres-password@postgres:5432/researchgpt_db
 ```
 
-5. If Ollama runs on your host machine, keep:
+5. Add your Gemini API key from Google AI Studio:
 
 ```env
-OLLAMA_BASE_URL=http://host.docker.internal:11434
+GEMINI_API_KEY=your-gemini-api-key
+GEMINI_MODEL=gemini-2.5-flash
+GEMINI_TIMEOUT_SECONDS=120
 ```
 
-For a cloud Ollama-compatible endpoint, replace it with that private service URL.
+Keep the Gemini API key in environment variables only. Do not hardcode it in source files or Docker images.
 
 ## Docker Commands
 
@@ -142,7 +144,7 @@ Docker Compose mounts that path to the `chromadb_data` volume. Uploaded PDFs are
 2. Create a PostgreSQL database in Render.
 3. Create a Web Service from the repository.
 4. Use Docker as the runtime.
-5. Add environment variables from `.env.example` in Render's dashboard.
+5. Add environment variables from `.env.example` in Render's dashboard, including `GEMINI_API_KEY`.
 6. Set `DATABASE_URL` to the Render PostgreSQL internal connection string.
 7. Add persistent disk storage if you want uploaded PDFs and ChromaDB data to survive deploys:
    - Mount path: `/app/papers`
@@ -152,6 +154,22 @@ Docker Compose mounts that path to the `chromadb_data` volume. Uploaded PDFs are
 ```bash
 curl https://your-render-service.onrender.com/api/health
 ```
+
+## Vercel Deployment
+
+Use Vercel for the static frontend and keep the FastAPI backend on Render, Railway, or another host that supports persistent disks. This project stores uploaded PDFs in `/app/papers` and ChromaDB data in `/app/chromadb`, so deploying the backend unchanged to Vercel serverless functions is not recommended.
+
+1. Deploy the backend first using the Render steps above.
+2. Create a Vercel project for the `frontend/` directory.
+3. Point the frontend at the backend API URL before loading `frontend/js/auth.js`:
+
+```html
+<script>
+  window.RESEARCHGPT_API_BASE = "https://your-render-service.onrender.com";
+</script>
+```
+
+4. Keep `GEMINI_API_KEY`, PostgreSQL credentials, JWT secrets, `/app/papers`, and `/app/chromadb` on the backend host only.
 
 ## Railway Deployment
 

@@ -27,13 +27,21 @@ from pathlib import Path
 from nltk.tokenize import word_tokenize
 from nltk.corpus import stopwords
 
+from dotenv import load_dotenv
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from sentence_transformers import SentenceTransformer
-from langchain_ollama import OllamaLLM
+import google.generativeai as genai
+from google.api_core import exceptions as google_api_exceptions
+from requests.exceptions import (
+    ConnectionError as RequestsConnectionError,
+    RequestException,
+    Timeout as RequestsTimeout,
+)
 
 nltk.download("punkt")
 nltk.download("punkt_tab")
 nltk.download("stopwords")
+
 
 # ===================================================================
 # CONFIGURATION
@@ -41,17 +49,164 @@ nltk.download("stopwords")
 
 print("\nInitializing AI Research Bot 3.0...")
 
+load_dotenv()
+
 BASE_DIR = Path(__file__).resolve().parent
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL")
 CHROMADB_PATH = os.getenv("CHROMADB_PATH", str(BASE_DIR / "chromadb"))
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+NOT_FOUND_RESPONSE = "Information not found in the uploaded papers."
 
-llm_config = {
-    "model": "llama3",
-}
-if OLLAMA_BASE_URL:
-    llm_config["base_url"] = OLLAMA_BASE_URL
+try:
+    GEMINI_TIMEOUT_SECONDS = int(os.getenv("GEMINI_TIMEOUT_SECONDS", "120"))
+except ValueError:
+    GEMINI_TIMEOUT_SECONDS = 120
 
-llm = OllamaLLM(**llm_config)
+
+class GeminiGenerationError(Exception):
+    def __init__(
+        self,
+        message,
+        status_code=503,
+        error_type="gemini_api_error",
+    ):
+        super().__init__(message)
+        self.message = message
+        self.status_code = status_code
+        self.error_type = error_type
+
+
+class GeminiLLM:
+    def __init__(
+        self,
+        model_name,
+        timeout_seconds,
+    ):
+        self.model_name = model_name
+        self.timeout_seconds = timeout_seconds
+        self._model = None
+
+    def _get_model(self):
+        api_key = (os.getenv("GEMINI_API_KEY") or "").strip()
+        if not api_key:
+            raise GeminiGenerationError(
+                "Gemini API key is not configured. Set GEMINI_API_KEY in your environment.",
+                status_code=503,
+                error_type="gemini_api_key_missing",
+            )
+
+        if self._model is None:
+            genai.configure(
+                api_key=api_key,
+                transport="rest",
+            )
+            self._model = genai.GenerativeModel(
+                self.model_name,
+                generation_config={
+                    "temperature": 0.2,
+                    "top_p": 0.95,
+                    "max_output_tokens": 2048,
+                },
+            )
+
+        return self._model
+
+    def invoke(self, prompt):
+        try:
+            response = self._get_model().generate_content(
+                prompt,
+                request_options={
+                    "timeout": self.timeout_seconds
+                },
+            )
+        except (
+            google_api_exceptions.Unauthenticated,
+            google_api_exceptions.PermissionDenied,
+        ) as error:
+            raise GeminiGenerationError(
+                "Gemini API key is invalid or does not have access to this model.",
+                status_code=401,
+                error_type="gemini_invalid_api_key",
+            ) from error
+        except google_api_exceptions.ResourceExhausted as error:
+            raise GeminiGenerationError(
+                "Gemini quota or rate limit exceeded. Please try again later.",
+                status_code=429,
+                error_type="gemini_quota_exceeded",
+            ) from error
+        except google_api_exceptions.DeadlineExceeded as error:
+            raise GeminiGenerationError(
+                "Gemini request timed out. Please try again.",
+                status_code=504,
+                error_type="gemini_timeout",
+            ) from error
+        except google_api_exceptions.ServiceUnavailable as error:
+            raise GeminiGenerationError(
+                "Gemini API is temporarily unavailable. Please try again later.",
+                status_code=503,
+                error_type="gemini_unavailable",
+            ) from error
+        except google_api_exceptions.RetryError as error:
+            cause = getattr(error, "cause", None) or error.__cause__
+            if isinstance(cause, google_api_exceptions.DeadlineExceeded):
+                raise GeminiGenerationError(
+                    "Gemini request timed out. Please try again.",
+                    status_code=504,
+                    error_type="gemini_timeout",
+                ) from error
+
+            raise GeminiGenerationError(
+                "Gemini API is temporarily unavailable. Please try again later.",
+                status_code=503,
+                error_type="gemini_unavailable",
+            ) from error
+        except (RequestsTimeout, TimeoutError) as error:
+            raise GeminiGenerationError(
+                "Gemini request timed out. Please try again.",
+                status_code=504,
+                error_type="gemini_timeout",
+            ) from error
+        except (RequestsConnectionError, RequestException, OSError) as error:
+            raise GeminiGenerationError(
+                "Network error while contacting Gemini. Please check your connection and try again.",
+                status_code=503,
+                error_type="gemini_network_error",
+            ) from error
+        except google_api_exceptions.GoogleAPICallError as error:
+            raise GeminiGenerationError(
+                "Gemini API request failed. Please try again later.",
+                status_code=502,
+                error_type="gemini_api_error",
+            ) from error
+        except Exception as error:
+            raise GeminiGenerationError(
+                "Gemini API is unavailable right now. Please try again later.",
+                status_code=503,
+                error_type="gemini_unavailable",
+            ) from error
+
+        try:
+            answer = response.text.strip()
+        except (AttributeError, ValueError) as error:
+            raise GeminiGenerationError(
+                "Gemini did not return a usable answer. Please try again.",
+                status_code=502,
+                error_type="gemini_empty_response",
+            ) from error
+
+        if not answer:
+            raise GeminiGenerationError(
+                "Gemini did not return a usable answer. Please try again.",
+                status_code=502,
+                error_type="gemini_empty_response",
+            )
+
+        return answer
+
+
+llm = GeminiLLM(
+    model_name=GEMINI_MODEL,
+    timeout_seconds=GEMINI_TIMEOUT_SECONDS,
+)
 
 splitter = RecursiveCharacterTextSplitter(
     chunk_size=500,
@@ -335,6 +490,16 @@ def index_uploaded_paper(file_path, filename, user_id):
     user_papers[_paper_key(user_id, filename)] = paper_text
 
     return len(extracted_chunks)
+
+
+def delete_indexed_paper(filename, user_id):
+    filename = Path(filename).name
+
+    collection.delete(
+        where=_user_filename_filter(user_id, filename)
+    )
+
+    user_papers.pop(_paper_key(user_id, filename), None)
 
 
 def summarize_paper(filename, user_id=None):
@@ -648,16 +813,18 @@ def answer_question(question, user_id=None):
     retrieved_metas = results["metadatas"][0]
 
     if not retrieved_chunks:
-        return "Information not found in uploaded papers."
+        return NOT_FOUND_RESPONSE
 
     context = "\n\n".join(retrieved_chunks)
 
     prompt = f"""
+You are an AI Research Assistant.
+
 Answer ONLY using the provided context.
 
-If the answer is not available in the context,
-reply with:
-'Information not found in uploaded papers.'
+If the answer is not found in the context, respond:
+
+"Information not found in the uploaded papers."
 
 Context:
 {context}
@@ -669,6 +836,9 @@ Answer:
 """
 
     answer = llm.invoke(prompt)
+
+    if answer.strip().strip("\"'") == NOT_FOUND_RESPONSE:
+        return NOT_FOUND_RESPONSE
 
     evidence = set()
 

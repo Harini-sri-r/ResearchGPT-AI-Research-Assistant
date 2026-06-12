@@ -430,6 +430,7 @@ button.action-card {
 .item-actions .button {
     min-height: 36px;
     padding: 0.45rem 0.7rem;
+    white-space: nowrap;
 }
 
 .history-toolbar {
@@ -602,6 +603,28 @@ button.action-card {
         display: grid;
     }
 
+    .workspace {
+        padding: 0.8rem;
+    }
+
+    .workspace-header h1 {
+        font-size: 1.9rem;
+    }
+
+    .toolbar {
+        display: grid;
+        grid-template-columns: 42px minmax(0, 1fr);
+        width: 100%;
+    }
+
+    .data-list {
+        padding: 0.75rem;
+    }
+
+    .data-item {
+        padding: 0.85rem;
+    }
+
     .side-nav {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
@@ -619,7 +642,16 @@ button.action-card {
     }
 
     .item-actions {
-        justify-content: flex-start;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        justify-content: stretch;
+        width: 100%;
+    }
+
+    .item-actions .button {
+        width: 100%;
+        min-width: 0;
+        padding-inline: 0.5rem;
     }
 
     .detail-list div {
@@ -635,5 +667,9 @@ button.action-card {
 
     .workspace-header h1 {
         font-size: 1.75rem;
+    }
+
+    .panel-heading {
+        padding: 0.85rem;
     }
 }

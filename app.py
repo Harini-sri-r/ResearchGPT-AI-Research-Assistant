@@ -271,6 +271,173 @@ def list_my_papers(
     )
 
 
+def get_current_user_paper(
+    paper_id: int,
+    current_user: User,
+    db: Session,
+):
+    paper = (
+        db.query(UploadedPaper)
+        .filter(
+            UploadedPaper.id == paper_id,
+            UploadedPaper.user_id == current_user.id,
+        )
+        .first()
+    )
+
+    if paper is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Paper not found.",
+        )
+
+    return paper
+
+
+def resolve_paper_path(
+    paper: UploadedPaper,
+    require_exists: bool = True,
+):
+    paper_path = Path(paper.filepath)
+    if not paper_path.is_absolute():
+        paper_path = BASE_DIR / paper_path
+
+    user_papers_dir = (PAPERS_DIR / f"user_{paper.user_id}").resolve()
+    resolved_path = paper_path.resolve()
+
+    try:
+        resolved_path.relative_to(user_papers_dir)
+    except ValueError as error:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Paper file path is invalid.",
+        ) from error
+
+    if require_exists and not resolved_path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Paper file not found on the server.",
+        )
+
+    return resolved_path
+
+
+@app.get(
+    "/papers/{paper_id}/view",
+    tags=["Research"],
+    summary="View one uploaded paper for the current user",
+)
+def view_paper(
+    paper_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    paper = get_current_user_paper(
+        paper_id=paper_id,
+        current_user=current_user,
+        db=db,
+    )
+    file_path = resolve_paper_path(paper)
+
+    return FileResponse(
+        path=file_path,
+        media_type="application/pdf",
+        filename=paper.filename,
+        content_disposition_type="inline",
+    )
+
+
+@app.get(
+    "/papers/{paper_id}/download",
+    tags=["Research"],
+    summary="Download one uploaded paper for the current user",
+)
+def download_paper(
+    paper_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    paper = get_current_user_paper(
+        paper_id=paper_id,
+        current_user=current_user,
+        db=db,
+    )
+    file_path = resolve_paper_path(paper)
+
+    return FileResponse(
+        path=file_path,
+        media_type="application/pdf",
+        filename=paper.filename,
+        content_disposition_type="attachment",
+    )
+
+
+@app.delete(
+    "/papers/{paper_id}",
+    response_model=MessageResponse,
+    tags=["Research"],
+    summary="Delete one uploaded paper for the current user",
+)
+def delete_paper(
+    paper_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    paper = get_current_user_paper(
+        paper_id=paper_id,
+        current_user=current_user,
+        db=db,
+    )
+    file_path = resolve_paper_path(
+        paper,
+        require_exists=False,
+    )
+    filename = paper.filename
+
+    try:
+        from research import delete_indexed_paper
+
+        delete_indexed_paper(
+            filename=filename,
+            user_id=current_user.id,
+        )
+    except ModuleNotFoundError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Research engine dependency missing: {error.name}",
+        ) from error
+    except Exception as error:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Unable to delete paper from search index: {error}",
+        ) from error
+
+    try:
+        if file_path.exists():
+            file_path.unlink()
+
+        (
+            db.query(Favorite)
+            .filter(
+                Favorite.user_id == current_user.id,
+                Favorite.paper_name == filename,
+            )
+            .delete(synchronize_session=False)
+        )
+        db.delete(paper)
+        db.commit()
+    except Exception as error:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Unable to delete paper: {error}",
+        ) from error
+
+    return {
+        "message": f"{filename} deleted successfully."
+    }
+
+
 @app.get(
     "/my-chat-history",
     response_model=list[ChatHistoryResponse],
@@ -319,6 +486,7 @@ def ask_question(
 
     try:
         from research import (
+            GeminiGenerationError,
             answer_question,
             summarize_paper,
             compare_papers,
@@ -345,55 +513,62 @@ def ask_question(
     parts = question.split()
     command = parts[0].lower()
 
-    if command == "summarize":
-        if len(parts) < 2:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Usage: summarize <filename>",
+    try:
+        if command == "summarize":
+            if len(parts) < 2:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Usage: summarize <filename>",
+                )
+
+            filename = parts[1]
+
+            result = summarize_paper(filename, user_id=current_user.id)
+
+        elif command == "compare":
+            if len(parts) < 3:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Usage: compare <file1> <file2>",
+                )
+
+            file1 = parts[1]
+            file2 = parts[2]
+
+            result = compare_papers(
+                file1,
+                file2,
+                user_id=current_user.id,
             )
 
-        filename = parts[1]
+        elif command == "review":
+            files = parts[1:]
 
-        result = summarize_paper(filename, user_id=current_user.id)
+            result = literature_review(files, user_id=current_user.id)
 
-    elif command == "compare":
-        if len(parts) < 3:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Usage: compare <file1> <file2>",
-            )
+        elif command == "gap":
+            files = parts[1:]
 
-        file1 = parts[1]
-        file2 = parts[2]
+            result = research_gap(files, user_id=current_user.id)
 
-        result = compare_papers(
-            file1,
-            file2,
-            user_id=current_user.id,
+        elif command == "recommend":
+            files = parts[1:]
+
+            result = recommend_research(files, user_id=current_user.id)
+
+        elif command == "survey":
+            files = parts[1:]
+
+            result = generate_survey(files, user_id=current_user.id)
+
+        else:
+            result = answer_question(question, user_id=current_user.id)
+    except GeminiGenerationError as error:
+        return error_response(
+            status_code=error.status_code,
+            message=error.message,
+            error_type=error.error_type,
         )
-
-    elif command == "review":
-        files = parts[1:]
-
-        result = literature_review(files, user_id=current_user.id)
-
-    elif command == "gap":
-        files = parts[1:]
-
-        result = research_gap(files, user_id=current_user.id)
-
-    elif command == "recommend":
-        files = parts[1:]
-
-        result = recommend_research(files, user_id=current_user.id)
-
-    elif command == "survey":
-        files = parts[1:]
-
-        result = generate_survey(files, user_id=current_user.id)
-
-    else:
-        result = answer_question(question, user_id=current_user.id)
 
     response_time = f"{perf_counter() - start_time:.2f}s"
 
